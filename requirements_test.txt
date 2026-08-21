@@ -1,0 +1,13 @@
+# Test-only dependencies.
+#
+#   python3 -m venv .venv
+#   .venv/bin/python -m pip install -r requirements_test.txt
+#   .venv/bin/python -m pytest
+#
+# This single package pins homeassistant and the pytest plugins (pytest-asyncio,
+# pytest-aiohttp, syrupy, ...) transitively, so the HA version under test is
+# whatever it depends on — 2025.1.4 for 0.13.205. Bump this to test against a
+# newer HA release.
+#
+# Only tests_ha/ needs this; tests/ stubs the HA imports and runs on bare pytest.
+pytest-homeassistant-custom-component==0.13.205
