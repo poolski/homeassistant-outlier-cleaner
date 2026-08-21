@@ -106,9 +106,11 @@ Three methods are available. Two are safe to use in automations; one is manual-o
 
 ### `mad` — Median Absolute Deviation
 
-**How it works:** Computes the [modified z-score](https://www.itl.nist.gov/div898/handbook/eda/section3/eda35h.htm) for every row's `change` value. Rows whose score exceeds `mad_factor` are flagged. The score is based on how far a value deviates from the median, scaled by the median absolute deviation of the whole dataset.
+**How it works:** Computes the [modified z-score](https://www.itl.nist.gov/div898/handbook/eda/section3/eda35h.htm) for every row's `change` value. Rows whose score exceeds `mad_factor` are flagged.
 
-**Key property:** If the sensor readings are flat or near-uniform (e.g. a solar panel at night), MAD returns zero results rather than flagging normal values. This makes it the safest choice for scheduled automations.
+Rather than comparing against one global median, each row is judged against **rows at the same time of day** (±5 min for hourly, ±30 s for 5-minute). This matters for sensors with a daily rhythm: 18:00 on a Tuesday is compared with 18:00 on other days, not with 03:00. The row being tested is excluded from its own baseline, so a large spike cannot drag the median toward itself and mask its own detection.
+
+**Key property:** MAD does not flag normal variation — on clean data it returns nothing, which is what makes it safe for scheduled automations. When a sensor's baseline is genuinely flat (a solar panel's night hours are all exactly `0.0`), there is no spread to compute a z-score from; such rows are instead flagged only if they exceed the sensor's normal operating magnitude by more than 100×. That keeps flat-baseline sensors from producing false positives while still catching the impossible values a restart spike produces.
 
 **Parameter:** `mad_factor` (default `6`). Higher values are more conservative — only extreme outliers are flagged. Lower values cast a wider net.
 
