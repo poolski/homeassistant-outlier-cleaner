@@ -60,7 +60,7 @@ After installation a new **Outlier Cleaner** entry appears in the sidebar (admin
 1. Pick a statistic from the autocomplete picker (only sum-capable statistics are shown).
 2. Select a date range.
 3. Choose a detection method and click **Scan**.
-4. Check the rows you want to fix (all are pre-selected). Set a replacement change value (default `0` removes the spike entirely).
+4. Check the rows you want to fix. Nothing is selected for you — a scan returns suggestions, and `top_n` in particular always returns N rows whether or not the data is clean. Set a replacement change value (default `0` removes the spike entirely).
 5. Click **Apply Fix to Selected**. The fix is recorded in the history table below with its fix ID.
 6. To undo, click **Restore** next to the relevant history entry.
 

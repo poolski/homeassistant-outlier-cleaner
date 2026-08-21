@@ -90,6 +90,7 @@ const WS = {
 
 const STYLES = `
   :host {
+    --soc-toolbar-height: 56px;
     display: block;
     height: 100%;
     overflow-y: auto;
@@ -101,6 +102,36 @@ const STYLES = `
   }
   h2 { margin: 0 0 16px; font-size: 1.4rem; font-weight: 500; }
   h3 { margin: 0 0 12px; font-size: 1.1rem; font-weight: 500; }
+  /* A custom panel registered with embed_iframe: false owns the whole view —
+     Home Assistant renders no header of its own. Without a way to reach the
+     sidebar the panel is a dead end on mobile, where the sidebar is hidden.
+     Sticky so it stays reachable however far down the page you are. */
+  .app-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: var(--soc-toolbar-height);
+    margin: -16px -16px 12px;
+    padding: 0 12px;
+    box-sizing: border-box;
+    background: var(--app-header-background-color, var(--primary-background-color, #fafafa));
+    color: var(--app-header-text-color, var(--primary-text-color));
+  }
+  .app-toolbar .app-title { font-size: 1.15rem; font-weight: 500; }
+  .menu-btn {
+    background: transparent;
+    color: inherit;
+    height: 40px;
+    width: 40px;
+    padding: 0;
+    flex: 0 0 auto;
+    justify-content: center;
+    border-radius: 50%;
+  }
+  .menu-btn:hover { background: rgba(var(--rgb-primary-text-color, 0,0,0), 0.08); }
   .card {
     background: var(--card-background-color, #fff);
     border-radius: 12px;
@@ -226,7 +257,8 @@ const STYLES = `
   .hidden { display: none !important; }
   table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
   th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--divider-color, #e0e0e0); }
-  th { font-weight: 500; background: var(--secondary-background-color, #f5f5f5); position: sticky; top: 0; }
+  /* Offset by the toolbar so a sticky header doesn't slide under it. */
+  th { font-weight: 500; background: var(--secondary-background-color, #f5f5f5); position: sticky; top: var(--soc-toolbar-height); z-index: 1; }
   tr:hover td { background: rgba(var(--rgb-primary-color, 3,169,244), 0.05); }
   tr.selected td { background: rgba(var(--rgb-primary-color, 3,169,244), 0.1); }
   td.change-cell { font-family: monospace; }
@@ -440,6 +472,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     this._allStats = [];      // full list from WS
     this._activeIdx = -1;     // keyboard nav index in dropdown
     this._recentStats = this._loadRecentStats();
+    this._narrow = undefined;   // set by HA; undefined means "not told yet"
     this._onDocClick = (e) => {
       if (!this.shadowRoot.contains(e.target)) this._closeDropdown();
     };
@@ -457,6 +490,18 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
       this._loadStatistics();
       this._loadHistory();
     }
+  }
+
+  // HA sets this on custom panels and updates it as the viewport changes. It is
+  // what tells us the sidebar is hidden and the menu button is the only way out.
+  set narrow(value) {
+    if (this._narrow === value) return;
+    this._narrow = value;
+    if (this.shadowRoot.getElementById("app-toolbar")) this._renderToolbar();
+  }
+
+  get narrow() {
+    return this._narrow;
   }
 
   // ---------------------------------------------------------------------------
@@ -513,7 +558,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>${STYLES}</style>
 
-      <h2>Statistics Outlier Cleaner</h2>
+      <div class="app-toolbar" id="app-toolbar"></div>
 
       <div class="card">
         <h3>Scan</h3>
@@ -613,7 +658,46 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
       </div>
     `;
 
+    this._renderToolbar();
     this._wireEvents();
+  }
+
+  _renderToolbar() {
+    const bar = this._q("app-toolbar");
+    if (!bar) return;
+    bar.innerHTML = "";
+
+    // Only needed when the sidebar is hidden. `narrow` is set by HA (see
+    // setCustomPanelProperties in ha-panel-custom). Undefined means it hasn't
+    // told us yet, so show the button rather than risk a dead end.
+    if (this._narrow !== false) {
+      // We own this button rather than reusing HA's `ha-menu-button`: that
+      // element resolves `narrow` and `ui` through @lit/context and may not be
+      // defined at the moment we render, so depending on it is a race. Firing
+      // the event directly is what ha-menu-button itself does on click.
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "menu-btn";
+      btn.setAttribute("aria-label", "Open sidebar");
+      btn.innerHTML =
+        `<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">` +
+        `<path fill="currentColor" d="M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16Z"/></svg>`;
+      btn.addEventListener("click", () => this._toggleSidebar());
+      bar.appendChild(btn);
+    }
+
+    const title = document.createElement("div");
+    title.className = "app-title";
+    title.textContent = "Statistics Outlier Cleaner";
+    bar.appendChild(title);
+  }
+
+  _toggleSidebar() {
+    // HA listens for this on the way up from the panel. bubbles + composed match
+    // fireEvent's defaults so it escapes our shadow root and reaches the app.
+    this.dispatchEvent(
+      new CustomEvent("hass-toggle-menu", { bubbles: true, composed: true })
+    );
   }
 
   _wireEvents() {
@@ -869,7 +953,10 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     try {
       const result = await this._send(params);
       this._candidates = result.candidates || [];
-      this._selected = new Set(this._candidates.map((_, i) => i));
+      // Nothing is pre-selected. A scan result is a set of suggestions, not a
+      // verdict — top_n in particular always returns N rows whether or not the
+      // data is clean, so pre-selecting them invites fixing normal readings.
+      this._selected = new Set();
       this._renderResults(result);
       this._clearStatus();
       const statMeta = this._allStats.find((s) => s.statistic_id === statId);
@@ -957,7 +1044,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
         <thead>
           <tr>
             <th style="width:32px"><input type="checkbox" id="check-all" ${
-              this._selected.size === this._candidates.length ? "checked" : ""
+              this._allSelected() ? "checked" : ""
             }></th>
             <th>Start</th><th>Period</th><th>Change</th><th>State</th>
           </tr>
@@ -986,9 +1073,13 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     this._renderTable();
   }
 
+  _allSelected() {
+    return this._candidates.length > 0 && this._selected.size === this._candidates.length;
+  }
+
   _updateSelectionCount() {
     const n = this._selected.size, total = this._candidates.length;
-    this._q("selection-count").textContent = n ? `${n} of ${total} selected` : "";
+    this._q("selection-count").textContent = total ? `${n} of ${total} selected` : "";
     this._q("btn-apply").disabled = n === 0;
     this._renderApplySummary();
   }
@@ -996,7 +1087,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
   _updateCheckAll() {
     const cb = this._q("check-all");
     if (!cb) return;
-    cb.checked = this._selected.size === this._candidates.length;
+    cb.checked = this._allSelected();
     cb.indeterminate = this._selected.size > 0 && this._selected.size < this._candidates.length;
   }
 
@@ -1044,7 +1135,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
       if (!dryRun) {
         const removed = new Set(this._selected);
         this._candidates = this._candidates.filter((_, i) => !removed.has(i));
-        this._selected = new Set(this._candidates.map((_, i) => i));
+        this._selected = new Set();
         if (this._candidates.length) {
           this._renderTable();
         } else {
