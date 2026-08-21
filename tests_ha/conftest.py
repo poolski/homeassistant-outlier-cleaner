@@ -21,11 +21,45 @@ if "hass_frontend" not in sys.modules:
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# Make this repo's integration discoverable by HA's loader.
+#
+# HA finds custom integrations with a bare `import custom_components`, then walks
+# that package's __path__ (see homeassistant.loader._get_custom_components) — it
+# does NOT look at hass.config.config_dir. pytest-homeassistant-custom-component
+# imports its own testing_config/custom_components first, which claims the
+# top-level `custom_components` name in sys.modules, so sys.path ordering cannot
+# put ours ahead of it.
+#
+# Appending to __path__ makes it a multi-location package, so the plugin's test
+# integrations AND this repo's both resolve.
+import custom_components  # noqa: E402
 
-@pytest.fixture
-def hass_config_dir() -> str:
-    """Use the project root as HA config dir so custom_components/ is found."""
-    return PROJECT_ROOT
+_PROJECT_CUSTOM_COMPONENTS = os.path.join(PROJECT_ROOT, "custom_components")
+if _PROJECT_CUSTOM_COMPONENTS not in custom_components.__path__:
+    custom_components.__path__.append(_PROJECT_CUSTOM_COMPONENTS)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _prewarm_pycares_shutdown_thread() -> None:
+    """Start pycares' shutdown thread before any test observes the thread list.
+
+    pytest-homeassistant-custom-component's `verify_cleanup` fixture asserts that
+    a test leaves behind no new threads. pycares (the DNS resolver behind aiodns,
+    pulled in by aiohttp) lazily starts a single long-lived daemon thread the
+    first time a channel is created, which happens when the first test spins up
+    an HTTP/WebSocket client. That thread is never reaped, so whichever test
+    happens to run first gets blamed for "leaking" it.
+
+    Starting it here — once, at session scope — means it is already present in
+    every test's baseline snapshot. Best-effort: if pycares' internals move, the
+    tests still run and simply report the leak as before.
+    """
+    try:
+        from pycares import _shutdown_manager  # noqa: PLC0415
+
+        _shutdown_manager.start()
+    except Exception:  # noqa: BLE001 - purely an optimisation for test hygiene
+        pass
 
 
 @pytest.fixture(autouse=True)
