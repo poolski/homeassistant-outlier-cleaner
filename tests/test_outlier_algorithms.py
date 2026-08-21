@@ -287,15 +287,29 @@ class TestAlgoMad:
         conservative, _, _ = _algo_mad(candidates, mad_factor=10.0)
         assert len(aggressive) >= len(conservative)
 
-    def test_insufficient_peers_skips_candidate(self):
-        # Only 1 data point per time-of-day → fewer than 2 peers → nothing flagged.
+    def test_no_peers_skips_candidate(self):
+        # One data point per time-of-day, all an hour apart (>> tolerance), so no
+        # candidate has any peer in its window. With nothing to compare against,
+        # nothing can be judged.
         candidates = [_hour(h * _HOUR_MS, 1.0) for h in range(24)]
-        candidates.append(_hour(10 * _HOUR_MS + 1, 500.0))  # near hour 10 but unique tod
         flagged, _, _ = _algo_mad(candidates, mad_factor=3.0)
-        # tod slots are all unique (1-hour spacing >> tolerance), so each candidate
-        # has at most 1 peer in its window.  The near-hour-10 candidate is within
-        # tolerance of day-0's hour-10 entry (forming a 2-peer group), but their
-        # identical change values give MAD=0 → skipped by the degenerate-MAD guard.
+        assert flagged == []
+
+    def test_single_peer_still_catches_huge_spike(self):
+        # A candidate with exactly one peer at its time of day has no usable
+        # spread, but a 500x departure from that peer is still an outlier.
+        # Previously the degenerate-MAD guard skipped it outright.
+        candidates = [_hour(h * _HOUR_MS, 1.0) for h in range(24)]
+        candidates.append(_hour(10 * _HOUR_MS + 1, 500.0))  # within ±5min of hour 10
+        flagged, _, _ = _algo_mad(candidates, mad_factor=3.0)
+        assert [c.change for c in flagged] == [500.0]
+
+    def test_single_peer_does_not_flag_ordinary_variation(self):
+        # Same one-peer shape, but the candidate is only ~1.5x its peer — well
+        # inside normal variation. The degenerate path must stay blunt.
+        candidates = [_hour(h * _HOUR_MS, 1.0) for h in range(24)]
+        candidates.append(_hour(10 * _HOUR_MS + 1, 1.5))
+        flagged, _, _ = _algo_mad(candidates, mad_factor=3.0)
         assert flagged == []
 
     def test_near_zero_mad_no_false_positive(self):
@@ -341,6 +355,63 @@ class TestAlgoMad:
         cands.append(_five_min(29 * _DAY_MS + 12 * _HOUR_MS, 0.3))
         flagged, _, _ = _algo_mad(cands, mad_factor=3.5)
         assert flagged == [], "fp-noisy 5-minute peers must not create false positives"
+
+    def test_uniform_peers_do_not_hide_huge_spike(self):
+        # Peers are EXACTLY identical (quantised meter readings, or a sensor whose
+        # hourly change is genuinely constant). MAD == 0 exactly, so the modified
+        # z-score is undefined — but a 1e6x spike is still unmistakably an outlier.
+        # The degenerate-MAD guard must not skip the candidate outright.
+        cands = [_hour(d * _DAY_MS + 10 * _HOUR_MS, 1.0) for d in range(14)]
+        cands.append(_hour(14 * _DAY_MS + 10 * _HOUR_MS, 999_999.0))
+        flagged, _, _ = _algo_mad(cands, mad_factor=6.0)
+        assert [c.change for c in flagged] == [999_999.0]
+
+    def test_fp_noise_peers_do_not_hide_huge_spike(self):
+        # Same as above but peers differ only by floating-point noise (~1e-13),
+        # which is what real `change` values derived from large cumulative sums
+        # look like. MAD ~ 1e-13 trips the < 1e-9 floor and the spike is skipped.
+        cands = [
+            _hour(d * _DAY_MS + 10 * _HOUR_MS, 1.0 + (1e-13 if d % 2 else -1e-13))
+            for d in range(14)
+        ]
+        cands.append(_hour(14 * _DAY_MS + 10 * _HOUR_MS, 999_999.0))
+        flagged, _, _ = _algo_mad(cands, mad_factor=6.0)
+        assert [c.change for c in flagged] == [999_999.0]
+
+    def test_zero_baseline_peers_do_not_hide_huge_spike(self):
+        # Solar sensor at 03:00 — every night hour is exactly 0.0 change. A restart
+        # spike lands on one of them. Peers are all 0.0 so MAD == 0; the spike must
+        # still be flagged, judged against the sensor's overall change magnitude.
+        cands = []
+        for d in range(14):
+            cands.append(_hour(d * _DAY_MS + 3 * _HOUR_MS, 0.0))
+            # Daytime rows establish the sensor's normal scale (~1 kWh/h).
+            cands.append(_hour(d * _DAY_MS + 12 * _HOUR_MS, 1.0 + 0.05 * math.sin(d)))
+        cands.append(_hour(14 * _DAY_MS + 3 * _HOUR_MS, 500_000.0))
+        flagged, _, _ = _algo_mad(cands, mad_factor=6.0)
+        assert [c.change for c in flagged] == [500_000.0]
+
+    def test_two_peer_group_can_flag_huge_spike(self):
+        # With only 2 peers the median sits exactly between them, so both
+        # deviations equal gap/2 and the modified z-score is pinned at 0.6745 —
+        # structurally unable to reach any sane mad_factor. Excluding the
+        # candidate from its own baseline removes that ceiling.
+        cands = [
+            _hour(0 * _DAY_MS + 10 * _HOUR_MS, 1.0),
+            _hour(1 * _DAY_MS + 10 * _HOUR_MS, 1_000_000.0),
+        ]
+        flagged, _, _ = _algo_mad(cands, mad_factor=6.0)
+        assert [c.change for c in flagged] == [1_000_000.0]
+
+    def test_spike_does_not_inflate_its_own_baseline(self):
+        # Two spikes at the same time-of-day amongst few peers. When candidates are
+        # included in their own peer statistics they mask each other; leave-one-out
+        # baselines keep both visible.
+        cands = [_hour(d * _DAY_MS + 10 * _HOUR_MS, 1.0 + 0.1 * math.sin(d)) for d in range(6)]
+        cands.append(_hour(6 * _DAY_MS + 10 * _HOUR_MS, 800_000.0))
+        cands.append(_hour(7 * _DAY_MS + 10 * _HOUR_MS, 900_000.0))
+        flagged, _, _ = _algo_mad(cands, mad_factor=6.0)
+        assert sorted(c.change for c in flagged) == [800_000.0, 900_000.0]
 
     def test_daily_reset_multiday_with_spike(self):
         # Solar sensor over 14 days: 8 nighttime zero-change hours + 8 varying

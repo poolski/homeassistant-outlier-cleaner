@@ -214,6 +214,18 @@ _TOD_TOLERANCE_MS: dict[str, int] = {
     "hour":   300_000,   # ±5 minutes
 }
 
+# Below this, a MAD is indistinguishable from floating-point noise. HA computes
+# `change` as sum[i] - sum[i-1]; for sums up to ~50 000 kWh fp error is ~1e-12,
+# so any MAD >= 1e-9 reflects real variation.
+_MAD_EPSILON = 1e-9
+
+# When the peer baseline is degenerate (every peer effectively identical) the
+# modified z-score is undefined, so magnitude is compared against the baseline
+# scale instead. A candidate must exceed the baseline by this ratio — two orders
+# of magnitude — to be flagged. Deliberately blunt: this path only exists to
+# catch spikes that are obviously impossible, not to make fine judgements.
+_DEGENERATE_MAD_RATIO = 100.0
+
 
 def _algo_mad(
     candidates: list[OutlierCandidate], mad_factor: float
@@ -225,8 +237,15 @@ def _algo_mad(
       * ``"5minute"`` period: ±30 s
       * ``"hour"`` period:   ±5 min
 
-    Candidates with fewer than 2 non-zero peers at their time of day are
-    skipped — conservative behaviour when there is not enough history.
+    The candidate is excluded from its own baseline (leave-one-out). Including it
+    lets a spike drag the median toward itself and inflate the MAD, capping the
+    achievable z-score — with only two peers the median lands exactly between
+    them and the score is pinned at 0.6745 no matter how large the spike is.
+
+    When the peers are effectively identical the MAD collapses to ~0 and the
+    z-score is undefined. Rather than skip such candidates (which hides spikes
+    precisely on the flattest, most predictable sensors), magnitude is compared
+    against the baseline scale — see ``_DEGENERATE_MAD_RATIO``.
 
     Complexity: O(N × D) where D = distinct time-of-day buckets (≤24 for hourly,
     ≤288 for 5-minute). For 8 000 rows × 24 buckets ≈ 192 000 ops vs 64 M for O(N²).
@@ -235,6 +254,13 @@ def _algo_mad(
     """
     if not candidates:
         return [], None, None
+
+    # Fallback scale for the degenerate-MAD path when the local peer median is
+    # itself ~0 (e.g. a solar sensor's night hours are all exactly 0.0). The
+    # median of non-zero |change| across the whole scan describes the sensor's
+    # normal operating magnitude and is robust to a handful of spikes.
+    nonzero_changes = sorted(abs(c.change) for c in candidates if c.change != 0)
+    global_scale = _median_sorted(nonzero_changes)
 
     # Pre-group by exact time-of-day ms for O(log D) range lookup per candidate.
     tod_groups: dict[int, list[OutlierCandidate]] = {}
@@ -266,23 +292,29 @@ def _algo_mad(
             for key in tod_keys[:wrap_hi]:
                 peers.extend(tod_groups[key])
 
-        nonzero_peers = [p for p in peers if p.change != 0]
-        stat_peers = nonzero_peers if len(nonzero_peers) >= 2 else peers
-        if len(stat_peers) < 2:
+        # Leave-one-out: the candidate must not contribute to its own baseline.
+        others = [p for p in peers if p is not c]
+        nonzero_peers = [p for p in others if p.change != 0]
+        stat_peers = nonzero_peers if len(nonzero_peers) >= 2 else others
+        if not stat_peers:
             continue
+
         values = [p.change for p in stat_peers]
         median = _median_sorted(sorted(values))
         mad = _median_sorted(sorted(abs(v - median) for v in values))
-        # Guard against near-zero MAD from floating-point noise.
-        # HA computes `change` as sum[i] - sum[i-1]; for sums up to ~50 000 kWh
-        # fp error is ~1e-12, so any MAD >= 1e-9 reflects real variation.
-        # An absolute floor (rather than a median-relative one) avoids the
-        # regression where large medians (e.g. 1000 kWh) raise the floor to
-        # 0.001, suppressing genuine MAD values like 0.0005.
-        if mad < 1e-9:
+        deviation = abs(c.change - median)
+
+        if mad < _MAD_EPSILON:
+            # Degenerate baseline — no usable spread, so the z-score is
+            # undefined. Judge on raw magnitude relative to the baseline scale.
+            scale = abs(median) if abs(median) >= _MAD_EPSILON else global_scale
+            if scale < _MAD_EPSILON:
+                continue
+            if deviation >= _DEGENERATE_MAD_RATIO * scale:
+                flagged.append(c)
             continue
-        modified_z = 0.6745 * (c.change - median) / mad
-        if abs(modified_z) >= mad_factor:
+
+        if 0.6745 * deviation / mad >= mad_factor:
             flagged.append(c)
 
     return flagged, None, None
