@@ -1,14 +1,17 @@
 # Home Assistant with this integration mounted in, for browser tests.
 #
-# thomasloven/hass-custom-devcontainer is used purely for its bootstrap: it
-# generates a config, creates an admin user and skips onboarding, which is what
-# makes an unattended browser test possible. Its Lovelace plugin machinery
-# (LOVELACE_PLUGINS etc.) is irrelevant here — this integration serves its own
-# panel over a static path.
+# The official image is used rather than a devcontainer image so the suite runs
+# against the current release by default. Each HA release requires a specific
+# minimum Python, so installing a newer HA into an older image does not work:
+# 2026.8.3 needs Python >= 3.14.2, and an image built for 2025.3 ships 3.13.
+# Taking the version from the image tag keeps the interpreter and HA in step.
+#
+# The official image does no onboarding, so `onboard.sh` creates the admin user
+# and finishes the onboarding steps over HA's API once the container is healthy.
 
 services:
   homeassistant:
-    image: thomasloven/hass-custom-devcontainer:latest
+    image: "ghcr.io/home-assistant/home-assistant:${HA_VERSION:-stable}"
     ports:
       - "${HA_PORT:-8123}:8123"
     volumes:
@@ -17,14 +20,19 @@ services:
       - ../custom_components/statistics_outlier_cleaner:/config/custom_components/statistics_outlier_cleaner
       - ./bootstrap.sh:/bootstrap.sh:ro
     environment:
-      HASS_USERNAME: "${HASS_USERNAME:-dev}"
-      HASS_PASSWORD: "${HASS_PASSWORD:-dev}"
-      # Set to test against a specific HA release rather than whatever the
-      # image pins. The frontend internals this suite guards are what drift.
-      HA_VERSION: "${HA_VERSION:-}"
-    command: ["bash", "/bootstrap.sh"]
+      TZ: "${TZ:-Europe/London}"
+    # configuration.yaml has to exist before HA starts, and the image has no hook
+    # between the two, so write it here and then hand off to the real entrypoint.
+    entrypoint: ["/bin/bash", "/bootstrap.sh"]
     healthcheck:
-      test: ["CMD", "curl", "-fs", "http://localhost:8123/manifest.json"]
+      # curl is not guaranteed to be in the image; python is, since HA runs on it.
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8123/manifest.json')",
+        ]
       interval: 5s
       timeout: 5s
       retries: 60

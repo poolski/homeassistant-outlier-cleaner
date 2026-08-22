@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Browser tests against a real Home Assistant. Run on demand, not in CI.",
   "scripts": {
-    "up": "docker compose up -d --wait",
+    "up": "docker compose up -d --wait && ./onboard.sh",
     "down": "docker compose down -v",
     "logs": "docker compose logs -f homeassistant",
     "test": "playwright test",
