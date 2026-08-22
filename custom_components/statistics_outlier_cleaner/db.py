@@ -250,8 +250,22 @@ def restore_fix_sync(conn: sqlite3.Connection, fix_id: str) -> dict[str, Any]:
     Overwrites the current row values with the backed-up originals, then
     deletes the backup rows so the fix can be re-applied if desired.
     """
+    # One fix can back up the same row more than once: fixing several candidates
+    # in a single call cascades from each of them, so a row after the second
+    # candidate is backed up once with its true original value and again with the
+    # intermediate value left by the first candidate's cascade. Restoring the
+    # later entry would leave the row half-fixed, so take the earliest entry per
+    # row — lowest id is the first INSERT, which ran before any UPDATE.
     backup_rows = conn.execute(
-        f"SELECT * FROM {_BACKUP_TABLE} WHERE fix_id = ?",
+        f"""SELECT * FROM {_BACKUP_TABLE} AS b
+            WHERE b.fix_id = ?
+              AND b.id = (
+                  SELECT MIN(id) FROM {_BACKUP_TABLE}
+                  WHERE fix_id = b.fix_id
+                    AND source_table = b.source_table
+                    AND source_row_id = b.source_row_id
+              )
+            ORDER BY b.start_ts""",
         (fix_id,),
     ).fetchall()
 
