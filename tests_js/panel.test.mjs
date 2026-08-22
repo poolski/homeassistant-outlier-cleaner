@@ -175,3 +175,50 @@ describe("sidebar stays reachable when the sidebar is hidden", () => {
     assert.ok($(el, "app-toolbar").querySelector(".menu-btn"));
   });
 });
+
+describe("toolbar is pinned by layout, not by positioning", () => {
+  // jsdom does no layout, so these pin the structure that produces it. The
+  // toolbar floated mid-screen on a real phone because ha-panel-custom gives us
+  // no height: `height: 100%` collapsed to auto, the document scrolled instead
+  // of us, and `position: sticky` pinned to that scrollport, not the viewport.
+
+  test("toolbar is a sibling above the scrolling pane, not inside it", () => {
+    const el = mount({ narrow: true });
+    const bar = $(el, "app-toolbar");
+    const content = $(el, "panel-content");
+
+    assert.ok(content, "a dedicated scrolling pane should exist");
+    assert.equal(bar.parentElement, content.parentElement, "both should be top-level children");
+    assert.equal(bar.nextElementSibling, content, "toolbar should come immediately before the pane");
+    assert.equal(content.contains(bar), false, "toolbar must not scroll with the content");
+  });
+
+  test("the cards live inside the scrolling pane", () => {
+    const el = mount({ narrow: true });
+    const content = $(el, "panel-content");
+
+    for (const id of ["results-card", "apply-area", "history-table", "btn-scan"]) {
+      assert.ok(content.contains($(el, id)), `${id} should be inside the scrolling pane`);
+    }
+  });
+
+  test("host takes a definite height and does not itself scroll", () => {
+    const el = mount({ narrow: true });
+    const css = el.shadowRoot.querySelector("style").textContent;
+    const host = css.slice(css.indexOf(":host {"), css.indexOf("}", css.indexOf(":host {")));
+
+    assert.match(host, /flex-direction:\s*column/, "host should lay out as a column");
+    assert.match(host, /100dvh/, "host needs a viewport-derived height, not a percentage");
+    assert.match(host, /overflow:\s*hidden/, "host must not be the scroller");
+    assert.doesNotMatch(host, /height:\s*100%/, "percentage height collapses against ha-panel-custom");
+  });
+
+  test("toolbar does not rely on sticky positioning", () => {
+    const el = mount({ narrow: true });
+    const css = el.shadowRoot.querySelector("style").textContent;
+    const bar = css.slice(css.indexOf(".app-toolbar {"), css.indexOf("}", css.indexOf(".app-toolbar {")));
+
+    assert.doesNotMatch(bar, /position:\s*sticky/, "sticky pins to the wrong scrollport here");
+    assert.match(bar, /flex:\s*0 0 auto/, "toolbar should be a fixed-size flex row");
+  });
+});
