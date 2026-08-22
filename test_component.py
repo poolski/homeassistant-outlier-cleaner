@@ -145,10 +145,12 @@ def test_panel_uses_statistic_autocomplete(panel_js):
     assert "stat-dropdown" in panel_js
 
 
-def test_panel_uses_date_inputs(panel_js):
-    assert 'type="date"' in panel_js
-    assert "date-start" in panel_js
-    assert "date-end" in panel_js
+def test_panel_uses_ha_date_range_picker(panel_js):
+    # HA's own picker is the only date control; there is no fallback field of
+    # ours to drift from it.
+    assert "ha-date-range-picker" in panel_js
+    assert 'type="date"' not in panel_js
+    assert "date-range-wrap" in panel_js
 
 
 def test_panel_references_ws_commands(panel_js):
