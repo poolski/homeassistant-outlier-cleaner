@@ -44,6 +44,7 @@ from .const import (
 )
 from .db import apply_fix_sync, ensure_backup_table, resolve_metadata_id_sync, restore_fix_sync
 from .outlier import scan_outliers
+from .paths import DatabaseNotSupportedError, resolve_sqlite_path
 from .websocket import async_register_commands
 
 _LOGGER = logging.getLogger(__name__)
@@ -143,7 +144,11 @@ def _register_services(hass: HomeAssistant) -> None:
                 f"No recorder metadata found for {statistic_id!r}"
             )
 
-        db_path = hass.config.path("home-assistant_v2.db")
+        try:
+            db_path = resolve_sqlite_path(hass)
+        except DatabaseNotSupportedError as exc:
+            raise HomeAssistantError(str(exc)) from exc
+
         fix_id = str(uuid.uuid4())
         fix_ts = time.time()
 
@@ -178,7 +183,10 @@ def _register_services(hass: HomeAssistant) -> None:
 
     async def handle_restore_fix(call: ServiceCall) -> None:
         fix_id: str = call.data[ATTR_FIX_ID]
-        db_path = hass.config.path("home-assistant_v2.db")
+        try:
+            db_path = resolve_sqlite_path(hass)
+        except DatabaseNotSupportedError as exc:
+            raise HomeAssistantError(str(exc)) from exc
 
         def _run_sync() -> dict[str, Any]:
             conn = sqlite3.connect(db_path)
@@ -208,7 +216,24 @@ def _register_services(hass: HomeAssistant) -> None:
 
 
 def _check_sqlite_dialect(hass: HomeAssistant) -> None:
-    db_path = hass.config.path("home-assistant_v2.db")
+    """Warn at startup if the recorder database cannot be modified.
+
+    Best-effort only: this runs during setup, which may be before the recorder
+    is ready. Failing to determine the database here is not an error — every
+    operation that actually writes resolves the path again and reports properly.
+    """
+    try:
+        db_path = resolve_sqlite_path(hass)
+    except DatabaseNotSupportedError as exc:
+        _LOGGER.warning("Statistics Outlier Cleaner: %s", exc)
+        return
+    except Exception:  # noqa: BLE001 - recorder not up yet; not our problem here
+        _LOGGER.debug(
+            "Statistics Outlier Cleaner: recorder not available at setup, "
+            "deferring database checks"
+        )
+        return
+
     if not os.path.isfile(db_path):
         _LOGGER.warning(
             "Statistics Outlier Cleaner: SQLite database not found at %s. "
@@ -226,7 +251,6 @@ async def _resolve_metadata_id(
     API has moved in a newer HA release.
     """
     recorder = get_instance(hass)
-    db_path = hass.config.path("home-assistant_v2.db")
 
     def _fetch() -> int | None:
         try:
@@ -246,7 +270,9 @@ async def _resolve_metadata_id(
                 "ORM metadata lookup failed for %r, falling back to raw SQL",
                 statistic_id,
             )
-            conn = sqlite3.connect(db_path)
+            # Resolved here rather than up front so the normal ORM path never
+            # depends on the database being file-backed SQLite.
+            conn = sqlite3.connect(resolve_sqlite_path(hass))
             conn.row_factory = sqlite3.Row
             try:
                 return resolve_metadata_id_sync(conn, statistic_id)

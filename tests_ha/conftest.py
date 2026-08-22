@@ -71,6 +71,29 @@ def auto_enable_custom_integrations(hass: HomeAssistant) -> None:
 
 
 @pytest.fixture
+def recorder_db_path(tmp_path) -> str:
+    """Absolute path to the SQLite file the recorder will use for one test."""
+    return str(tmp_path / "home-assistant_v2.db")
+
+
+@pytest.fixture
+def recorder_db_url(recorder_db_path: str) -> str:
+    """Point the recorder at a real file instead of in-memory SQLite.
+
+    The default is `sqlite://` (in-memory), which this integration cannot work
+    with: it opens the recorder database over a second, plain sqlite3
+    connection, and an in-memory database is private to the connection that
+    created it. A file-backed recorder is what makes apply/restore testable at
+    all.
+
+    Deliberately *not* under hass.config.path() — keeping it somewhere the old
+    hardcoded path could never produce is what stops a regression to
+    `hass.config.path("home-assistant_v2.db")` from passing these tests.
+    """
+    return f"sqlite:///{recorder_db_path}"
+
+
+@pytest.fixture
 def mock_recorder_before_hass(recorder_db_url: str) -> None:
     """Ensure recorder_db_url is resolved before hass starts.
 
