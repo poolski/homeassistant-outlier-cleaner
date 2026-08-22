@@ -215,3 +215,95 @@ The most common pattern is a jump **up** on the restart hour immediately followe
 - **SQLite only.** The direct database write path does not support MariaDB or PostgreSQL.
 - **No chart.** The panel shows a table of flagged rows rather than a graph. Use the built-in Statistics developer tool to visualise before and after.
 - The `top_n` method is intentionally excluded from the `clean_outliers` service to prevent accidental data loss in automations.
+
+---
+
+## Developing
+
+### Layout
+
+| Path | What it is |
+| ---- | ---------- |
+| `custom_components/statistics_outlier_cleaner/` | The integration |
+| `custom_components/.../frontend/statistics-outlier-cleaner-panel.js` | The sidebar panel — a vanilla web component, no build step |
+| `tests/` | Pure-Python tests. Stub HA imports, so they run on bare pytest |
+| `tests_ha/` | Tests against a real recorder, via `pytest-homeassistant-custom-component` |
+| `tests_js/` | Panel tests in jsdom |
+| `tests_e2e/` | Browser tests against a real Home Assistant in Docker |
+
+The panel has no build step: edit the `.js` file and reload. There is nothing to
+compile, bundle, or watch.
+
+### Python tests
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements_test.txt
+.venv/bin/python -m pytest
+```
+
+`requirements_test.txt` pins `pytest-homeassistant-custom-component`, which is
+what pins the Home Assistant version under test. Bump it to test against a newer
+release. `tests/` needs none of it and runs on bare pytest; `tests_ha/` does.
+
+### Panel tests
+
+```bash
+cd tests_js && npm install && npm test
+```
+
+jsdom plus node's built-in test runner. Fast, and enough for the panel's own
+logic — anything that depends on a real HA frontend element belongs in
+`tests_e2e/` instead, because jsdom has no HA frontend to load.
+
+### Browser tests
+
+Needs Docker.
+
+```bash
+cd tests_e2e
+npm install
+npx playwright install chromium
+npm run e2e
+```
+
+These exist for one job: proving that the HA frontend elements the panel reaches
+for are really available to a custom panel. That can break through a Home
+Assistant release rather than through a change here, so run them after an HA
+upgrade and before a release. See `tests_e2e/README.md` for the details,
+including testing against a specific version:
+
+```bash
+HA_VERSION=2026.8.0 npm run e2e
+```
+
+To keep the instance up and iterate against it — `http://localhost:8123`, logs in
+as `dev` / `dev`:
+
+```bash
+npm run up
+npm test
+npm run down
+```
+
+The integration is bind-mounted into the container, so panel edits take effect on
+a browser reload with no rebuild.
+
+None of these suites run in CI; `.github/workflows` only runs hassfest and HACS
+validation.
+
+### Working on the panel
+
+Two things about the panel are worth knowing before changing it.
+
+Some HA frontend elements are not loaded for custom panels. `ha-date-range-picker`
+has to be coaxed into existence by loading a Lovelace card that imports it — see
+`_ensureDateRangePicker()`. Others, like `ha-assist-chip`, ship in the main bundle
+and can be used directly. Which is which is not documented anywhere, so check in a
+real instance rather than assuming.
+
+`ha-date-range-picker` is also a *controlled* element: picking a range fires
+`value-changed` but does not update the element's own `startDate` / `endDate`. HA's
+own panels feed the new value back through a Lit binding. This panel has no
+binding, so it writes the value back by hand; without that the field keeps
+displaying the range it was mounted with.
