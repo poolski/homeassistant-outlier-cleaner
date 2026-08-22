@@ -6,6 +6,17 @@
  * ha-date-range-picker as an import side effect. jsdom cannot answer whether
  * that still holds — only a real HA frontend can. That is the entire reason
  * this suite exists, so keep it to that question.
+ *
+ * The answer is version-dependent. window.loadCardHelpers is only defined as a
+ * side effect of loading the Lovelace panel, so a session that never opens a
+ * dashboard never gets it. On HA 2026.8 the default landing page is
+ * /home/overview rather than a dashboard, so it is normally absent and the
+ * picker cannot be loaded at all.
+ *
+ * The upgrade tests therefore skip when the frontend does not offer
+ * loadCardHelpers, and `native-date-inputs.spec.mjs` covers the fallback that
+ * every version gets. A skip here is a real result: it means users on this HA
+ * are seeing the native inputs.
  */
 
 import { expect, test } from "@playwright/test";
@@ -96,6 +107,17 @@ test.beforeEach(async ({ page }) => {
   await installDeepQuery(page);
   await login(page);
   await panel(page);
+
+  // Without loadCardHelpers the panel cannot register the picker, so there is
+  // nothing here to test. Skipping says so out loud rather than failing as if
+  // this were a regression in the panel.
+  const available = await page.evaluate(
+    () => typeof window.loadCardHelpers === "function"
+  );
+  test.skip(
+    !available,
+    "this HA does not expose window.loadCardHelpers, so the picker cannot load and the native inputs are what users get"
+  );
 });
 
 test("the panel registers ha-date-range-picker via loadCardHelpers", async ({

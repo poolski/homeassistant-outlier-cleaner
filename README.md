@@ -270,12 +270,19 @@ npm run e2e
 These exist for one job: proving that the HA frontend elements the panel reaches
 for are really available to a custom panel. That can break through a Home
 Assistant release rather than through a change here, so run them after an HA
-upgrade and before a release. See `tests_e2e/README.md` for the details,
-including testing against a specific version:
+upgrade and before a release.
+
+They run against the current HA release by default. The version comes from the
+image tag, so pin one with `HA_VERSION`:
 
 ```bash
 HA_VERSION=2026.8.0 npm run e2e
 ```
+
+Note that `HA_VERSION` selects an image tag rather than installing a version into
+a fixed image. Each HA release needs a specific minimum Python, so the two have to
+move together. See `tests_e2e/README.md` for the rest, including how onboarding
+is handled.
 
 To keep the instance up and iterate against it — `http://localhost:8123`, logs in
 as `dev` / `dev`:
@@ -296,11 +303,19 @@ validation.
 
 Two things about the panel are worth knowing before changing it.
 
-Some HA frontend elements are not loaded for custom panels. `ha-date-range-picker`
-has to be coaxed into existence by loading a Lovelace card that imports it — see
-`_ensureDateRangePicker()`. Others, like `ha-assist-chip`, ship in the main bundle
-and can be used directly. Which is which is not documented anywhere, so check in a
-real instance rather than assuming.
+Some HA frontend elements are not loaded for custom panels. `ha-assist-chip` ships
+in the main bundle and can be used directly. `ha-date-range-picker` has to be
+coaxed into existence by loading a Lovelace card that imports it — see
+`_ensureDateRangePicker()`. Which is which is not documented anywhere, so check in
+a real instance rather than assuming.
+
+That coaxing needs `window.loadCardHelpers`, and it is not always there. HA defines
+it as a side effect of loading the Lovelace panel, so a session that never opens a
+dashboard never gets it. On HA 2026.8 the default landing page is `/home/overview`
+rather than a dashboard, so it is normally absent and the picker cannot load at
+all. Anything reached this way needs a fallback that works without it — here, the
+native date inputs, which render on first paint and stay unless the picker can be
+mounted over them.
 
 `ha-date-range-picker` is also a *controlled* element: picking a range fires
 `value-changed` but does not update the element's own `startDate` / `endDate`. HA's

@@ -1,13 +1,15 @@
 # Browser tests
 
-Verifies the one thing no other test in this repo can: that
-`ha-date-range-picker` really loads inside a custom panel.
+Verifies the one thing no other test in this repo can: which HA frontend elements
+a custom panel can actually reach. jsdom has no HA frontend, so only a real
+instance can answer that, and the answer changes between HA releases rather than
+through any change here.
 
-The panel reaches it via `window.loadCardHelpers()`, relying on the energy date
-selection card's module registering the element as an import side effect. That
-depends on Home Assistant frontend internals, so it can break through an HA
-release rather than through a change here. jsdom has no HA frontend, so only a
-real instance can answer the question.
+| Spec | Question |
+| ---- | -------- |
+| `date-range-picker.spec.mjs` | Can `ha-date-range-picker` be loaded and driven? |
+| `native-date-inputs.spec.mjs` | Is there always *some* working date control? |
+| `recent-fixed-chips.spec.mjs` | Is `ha-assist-chip` available without any loading dance? |
 
 ## Running
 
@@ -37,21 +39,39 @@ Deliberate. Nothing in `.github/workflows` runs these, and nothing else in this
 repo runs `pytest` or the `tests_js` suite either. Run this before a release, or
 after an HA upgrade.
 
-## Testing against a specific HA version
+## Which HA version
 
-The image pins its own Home Assistant. Since HA frontend drift is exactly what
-this suite guards against, override it:
+The suite runs against the current release by default, because that is what
+users are on and frontend drift is what this suite exists to catch.
+
+The version comes from the image tag, not from a pip install into a fixed image.
+Each HA release requires a specific minimum Python - 2026.8.3 needs 3.14.2 - so
+installing a newer HA into an older image just fails to resolve. Pin a version by
+tag instead:
 
 ```bash
 HA_VERSION=2026.8.0 npm run e2e
+HA_VERSION=stable npm run e2e     # the default
 ```
 
-The picker contract the panel depends on — `hass`, `startDate`, `endDate`,
+The picker contract the panel depends on - `hass`, `startDate`, `endDate`,
 `ranges`, `extendedPresets`, and a `value-changed` event carrying
-`{value: {startDate, endDate}}` — has held since at least HA 2025.3. If a newer
-release breaks it, these tests fail. There is no fallback control — the panel
-retries the load across HA state updates, and a scan still runs on the default
-30-day range in the meantime.
+`{value: {startDate, endDate}}` - has held since at least HA 2025.3.
+
+Whether the picker can be loaded at all is a different question, and the answer
+got worse. `window.loadCardHelpers` is what registers it, and HA only defines
+that as a side effect of loading the Lovelace panel. A session that never opens a
+dashboard never gets it, and on HA 2026.8 the default landing page is
+`/home/overview` rather than a dashboard - so it is normally absent and the picker
+cannot load. That is why the panel keeps native date inputs as its real control.
+
+So the picker specs skip on an HA that does not expose `loadCardHelpers`. A skip
+is a result, not an absence of one: it means users on that version get the native
+inputs. Expect this on 2026.8 and the picker specs to run on 2025.3.
+
+`ha-assist-chip`, used for the recently-fixed chips, needs no loading dance - it
+ships in the main frontend bundle. `recent-fixed-chips.spec.mjs` is what tells us
+if that stops being true.
 
 ## What is deliberately not covered
 
@@ -62,11 +82,17 @@ keeps it small enough to trust.
 
 ## Container notes
 
-The image (`thomasloven/hass-custom-devcontainer`) is used only for its
-bootstrap: it generates a config, creates an admin user, and skips onboarding.
-Its Lovelace plugin support is irrelevant here, since the integration serves its
-own panel over a static path.
+The official `ghcr.io/home-assistant/home-assistant` image is used so the HA
+version and its Python stay in step. It does no onboarding of its own, so two
+scripts stand in for that:
 
-`bootstrap.sh` splits the image's one-shot entrypoint into `setup` -> edit
-`configuration.yaml` -> `launch`, because the integration is YAML-configured and
-that file does not exist until setup has run.
+| Script | What it does |
+| ------ | ------------ |
+| `bootstrap.sh` | Writes `configuration.yaml` with the integration enabled, then hands off to the image's entrypoint. Needed because the integration is YAML-configured and HA only writes a default config on first start, which is too late. |
+| `onboard.sh` | Creates the admin user and completes onboarding over HA's API, after the container reports healthy. `npm run up` runs it. |
+
+Onboarding goes through the API rather than pre-seeded `.storage` files on
+purpose: those files change shape between HA versions, which would defeat the
+point of running against the current release. `onboard.sh` reads
+`/api/onboarding` and completes whichever steps that HA reports outstanding, so a
+new or removed step does not break it.

@@ -7,10 +7,16 @@
  * by HA only when the Statistics dev-tools view is opened, so it is not
  * available here.
  *
- * ha-date-range-picker is reachable, though, because loading any Lovelace card
- * that uses it registers it as an import side effect — see
- * _ensureDateRangePicker(). That depends on HA frontend internals, so the native
- * date inputs remain as a fallback and are what renders on first paint.
+ * ha-date-range-picker is sometimes reachable: loading any Lovelace card that
+ * imports it registers it as an import side effect — see
+ * _ensureDateRangePicker(). That needs window.loadCardHelpers, which HA only
+ * defines as a side effect of loading the Lovelace panel. Someone who lands on
+ * the default dashboard and clicks straight through to us never loads it, and on
+ * HA 2026.8 the default landing page is not a dashboard at all, so it is often
+ * simply absent.
+ *
+ * So the native date inputs are the real control: they render on first paint and
+ * stay unless the picker can be loaded and mounted over them.
  */
 
 const DOMAIN = "statistics_outlier_cleaner";
@@ -48,6 +54,26 @@ function endOfLocalDay(date) {
   const d = new Date(date);
   d.setHours(23, 59, 59, 999);
   return d;
+}
+
+/**
+ * `YYYY-MM-DD` for a native date input, in local time.
+ *
+ * toISOString() would be UTC, which shows the wrong day for anyone whose offset
+ * puts them on the other side of midnight.
+ */
+function toDateInputValue(date) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/** Parse `YYYY-MM-DD` as a local date. `new Date(str)` would parse it as UTC. */
+function fromDateInputValue(value) {
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || "");
+  if (!parts) return null;
+  const [, y, m, d] = parts;
+  const date = new Date(Number(y), Number(m) - 1, Number(d));
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 const METHOD_HELP = {
@@ -711,6 +737,42 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
   // ---------------------------------------------------------------------------
 
   /**
+   * Seed the native date inputs and keep _startDate/_endDate in step with them.
+   *
+   * These are the fallback control, and they are what renders on first paint.
+   * They stay until HA's picker is mounted over them, which may never happen —
+   * see _ensureDateRangePicker().
+   */
+  _wireDateInputs() {
+    const start = this._q("date-start");
+    const end = this._q("date-end");
+    if (!start || !end) return;
+
+    start.value = toDateInputValue(this._startDate);
+    end.value = toDateInputValue(this._endDate);
+
+    start.addEventListener("change", () => {
+      const parsed = fromDateInputValue(start.value);
+      // A cleared or half-typed field would otherwise send NaN to the backend.
+      if (!parsed) {
+        start.value = toDateInputValue(this._startDate);
+        return;
+      }
+      this._startDate = parsed;
+    });
+
+    end.addEventListener("change", () => {
+      const parsed = fromDateInputValue(end.value);
+      if (!parsed) {
+        end.value = toDateInputValue(this._endDate);
+        return;
+      }
+      // The whole of the chosen day, matching what the picker reports.
+      this._endDate = endOfLocalDay(parsed);
+    });
+  }
+
+  /**
    * Register ha-date-range-picker, which HA does not load for custom panels.
    *
    * Creating a card element that depends on it is enough: the card module's
@@ -824,7 +886,16 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
           </div>
         </div>
 
-        <div class="form-row" id="date-range-wrap"></div>
+        <div class="form-row" id="date-range-wrap">
+          <div class="form-group">
+            <label for="date-start">From</label>
+            <input type="date" id="date-start">
+          </div>
+          <div class="form-group">
+            <label for="date-end">To</label>
+            <input type="date" id="date-end">
+          </div>
+        </div>
 
         <div class="form-row">
           <div class="form-group">
@@ -955,6 +1026,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     this._q("btn-select-none").addEventListener("click", () => this._selectAll(false));
     this._q("btn-refresh-history").addEventListener("click", () => this._loadHistory());
     this._q("btn-clear-stat").addEventListener("click", () => this._clearStat());
+    this._wireDateInputs();
     this._q("replacement").addEventListener("input", () => this._renderApplySummary());
     this._q("dry-run").addEventListener("change", () => this._renderApplySummary());
 

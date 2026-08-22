@@ -260,18 +260,54 @@ describe("date range without HA's picker available", () => {
     await settle();
   });
 
-  test("no home-grown date inputs are rendered", () => {
-    // The picker is the only date control; there is deliberately no fallback
-    // field of our own to diverge from it.
-    assert.equal(el.shadowRoot.querySelectorAll('input[type="date"]').length, 0);
-    assert.equal($(el, "date-start"), null);
-    assert.equal($(el, "date-end"), null);
+  // There has to be a control here. window.loadCardHelpers is what registers
+  // ha-date-range-picker, and it is only defined as a side effect of loading the
+  // Lovelace panel — which never happens for someone who lands on the default
+  // dashboard and clicks straight through to us. On HA 2026.8 that is the normal
+  // path, so with no fallback the panel has no date control at all.
+  test("native date inputs render when the picker is unavailable", () => {
+    assert.equal(el.shadowRoot.querySelectorAll('input[type="date"]').length, 2);
+    assert.ok($(el, "date-start"), "a From field should be rendered");
+    assert.ok($(el, "date-end"), "a To field should be rendered");
   });
 
-  test("the wrap is left empty for the picker to fill", () => {
-    const wrap = $(el, "date-range-wrap");
-    assert.ok(wrap, "the picker's mount point should exist");
-    assert.equal(wrap.children.length, 0);
+  test("the inputs are seeded with the default range in local time", () => {
+    // toISOString() would be UTC and shows the wrong day either side of
+    // midnight, so the value has to be built from local parts.
+    const local = (d) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+        d.getDate()
+      ).padStart(2, "0")}`;
+
+    assert.equal($(el, "date-start").value, local(startOfDay(-30)));
+    assert.equal($(el, "date-end").value, local(startOfDay(0)));
+  });
+
+  test("editing an input changes the range that gets scanned", async () => {
+    $(el, "date-start").value = "2026-02-03";
+    $(el, "date-start").dispatchEvent(new window.Event("change"));
+    $(el, "date-end").value = "2026-02-04";
+    $(el, "date-end").dispatchEvent(new window.Event("change"));
+
+    const params = await scanParams(el);
+
+    // Local midnight to the last instant of the local day, matching what the
+    // picker hands us. Parsing "YYYY-MM-DD" with new Date() would be UTC.
+    assert.equal(params.start_ts, new Date(2026, 1, 3, 0, 0, 0, 0).getTime() / 1000);
+    assert.equal(
+      params.end_ts,
+      new Date(2026, 1, 4, 23, 59, 59, 999).getTime() / 1000
+    );
+  });
+
+  test("a cleared input leaves the range alone rather than sending garbage", async () => {
+    const before = await scanParams(el);
+
+    $(el, "date-start").value = "";
+    $(el, "date-start").dispatchEvent(new window.Event("change"));
+
+    const after = await scanParams(el);
+    assert.equal(after.start_ts, before.start_ts);
   });
 
   test("scanning still works, using the default 30-day range", async () => {

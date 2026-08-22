@@ -146,10 +146,11 @@ def test_panel_uses_statistic_autocomplete(panel_js):
 
 
 def test_panel_uses_ha_date_range_picker(panel_js):
-    # HA's own picker is the only date control; there is no fallback field of
-    # ours to drift from it.
+    # HA's picker is preferred, but it can only be registered when the frontend
+    # exposes window.loadCardHelpers, which is often absent - so native date
+    # inputs have to be there as the fallback.
     assert "ha-date-range-picker" in panel_js
-    assert 'type="date"' not in panel_js
+    assert 'type="date"' in panel_js
     assert "date-range-wrap" in panel_js
 
 
