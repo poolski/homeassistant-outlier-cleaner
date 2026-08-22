@@ -26,6 +26,15 @@ const DATE_PICKER_MAX_ATTEMPTS = 20;
 
 const DEFAULT_RANGE_DAYS = 30;
 
+// Enough to cover the sensors you are actively working on without the row
+// wrapping onto a second line on a narrow screen.
+const RECENT_FIXED_CHIPS = 6;
+// ha-assist-chip is part of HA's main frontend bundle rather than a lazily
+// loaded card chunk, so unlike ha-date-range-picker it is already defined by the
+// time a custom panel renders. The plain-button fallback is for jsdom and for
+// the day that stops being true.
+const CHIP_TAG = "ha-assist-chip";
+
 /** Local midnight, `offsetDays` from today. */
 function startOfLocalDay(offsetDays = 0) {
   const d = new Date();
@@ -272,6 +281,27 @@ const STYLES = `
     font-style: italic;
   }
   .stat-option.recent-item { display: flex; align-items: flex-start; gap: 7px; }
+  .chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  /* Only reached when ha-assist-chip is unavailable; sized and shaped to match
+     the Material 3 assist chip so the row does not shift if it appears. */
+  button.chip-fallback {
+    height: 32px;
+    padding: 0 16px;
+    border-radius: 8px;
+    border: 1px solid var(--divider-color, #e0e0e0);
+    background: transparent;
+    color: var(--primary-text-color);
+    font-size: 0.875rem;
+    font-weight: 400;
+    max-width: 260px;
+  }
+  button.chip-fallback:hover {
+    background: rgba(var(--rgb-primary-text-color, 0,0,0), 0.08);
+  }
+  #recent-chips [data-statistic-id] {
+    cursor: pointer;
+    max-width: 260px;
+  }
   .stat-recent-icon { flex-shrink: 0; opacity: 0.45; font-size: 0.9rem; line-height: 1.4; }
   button {
     padding: 0 16px;
@@ -521,6 +551,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     this._pickerAttempts = 0;
     this._statId = null;
     this._allStats = [];      // full list from WS
+    this._fixes = [];         // recent fixes, newest first, from WS
     this._activeIdx = -1;     // keyboard nav index in dropdown
     this._recentStats = this._loadRecentStats();
     this._narrow = undefined;   // set by HA; undefined means "not told yet"
@@ -583,6 +614,10 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     } catch (e) {
       this._allStats = [];
     }
+    // This races the history load, so whichever finishes second is what turns
+    // raw statistic ids into friendly names.
+    this._renderRecentChips();
+    if (this._fixes.length) this._renderHistory(this._fixes);
   }
 
   // ---------------------------------------------------------------------------
@@ -604,6 +639,67 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     try {
       localStorage.setItem("statistics_outlier_cleaner_recents", JSON.stringify(this._recentStats));
     } catch (_) {}
+  }
+
+  // ---------------------------------------------------------------------------
+  // Recently fixed sensors
+  // ---------------------------------------------------------------------------
+
+  /**
+   * The most recently fixed statistics, newest first, one entry each.
+   *
+   * Derived from the fix history rather than stored separately: that is already
+   * a record of every edit, it lives in the recorder database, so the row is the
+   * same in every browser and survives clearing site data.
+   */
+  _recentlyFixed() {
+    const out = [];
+    const seen = new Set();
+    // list_fixes returns newest first, so first sighting wins.
+    for (const f of this._fixes) {
+      const id = f?.statistic_id;
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      out.push({ statistic_id: id, name: this._statName(id) });
+      if (out.length === RECENT_FIXED_CHIPS) break;
+    }
+    return out;
+  }
+
+  /** Friendly name for a statistic id, if the statistics list is loaded. */
+  _statName(statisticId) {
+    return this._allStats.find((s) => s.statistic_id === statisticId)?.name || null;
+  }
+
+  _renderRecentChips() {
+    const row = this._q("recent-chips-row");
+    const holder = this._q("recent-chips");
+    if (!row || !holder) return;
+
+    const recent = this._recentlyFixed();
+    row.classList.toggle("hidden", recent.length === 0);
+    holder.replaceChildren();
+
+    for (const { statistic_id, name } of recent) {
+      const label = name || statistic_id;
+      // Built as elements rather than markup: a statistic id is not ours to
+      // trust inside innerHTML, and the chip needs a click listener anyway.
+      const chip = document.createElement(
+        customElements.get(CHIP_TAG) ? CHIP_TAG : "button"
+      );
+      if (chip.tagName.toLowerCase() === CHIP_TAG) {
+        chip.setAttribute("label", label);
+      } else {
+        chip.type = "button";
+        chip.className = "chip-fallback";
+        chip.textContent = label;
+      }
+      chip.dataset.statisticId = statistic_id;
+      // The id is the useful part when the label is a friendly name.
+      chip.title = name ? `${name} — ${statistic_id}` : statistic_id;
+      chip.addEventListener("click", () => this._selectStat(statistic_id));
+      holder.appendChild(chip);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -683,7 +779,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
         this._endDate = value.endDate;
         // The element is controlled: it fires this event but does not update its
         // own startDate/endDate, so HA's panels re-feed the value through a Lit
-        // binding. We have no binding, so write it back by hand - otherwise the
+        // binding. We have no binding, so write it back by hand — otherwise the
         // label keeps showing the mounted range, every `picker.hass` assignment
         // re-renders the stale value into the inner picker, and the prev/next
         // arrows shift from that stale range rather than the selected one.
@@ -718,6 +814,13 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
               <button class="text-btn" id="btn-clear-stat" type="button" title="Change statistic">✕ Change</button>
             </div>
             <div class="stat-dropdown hidden" id="stat-dropdown"></div>
+          </div>
+        </div>
+
+        <div class="form-row hidden" id="recent-chips-row">
+          <div class="form-group">
+            <label>Recently fixed</label>
+            <div class="chip-row" id="recent-chips"></div>
           </div>
         </div>
 
@@ -1023,8 +1126,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
 
   _selectStat(value) {
     this._statId = value;
-    const statMeta = this._allStats.find((s) => s.statistic_id === value);
-    const name = statMeta?.name;
+    const name = this._statName(value);
     this._q("stat-selected-name").textContent = name || value;
     this._q("stat-selected-id").textContent = name ? value : "";
     this._q("stat-input").classList.add("hidden");
@@ -1091,8 +1193,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
       this._selected = new Set();
       this._renderResults(result);
       this._clearStatus();
-      const statMeta = this._allStats.find((s) => s.statistic_id === statId);
-      this._saveRecentStat(statId, statMeta?.name || null);
+      this._saveRecentStat(statId, this._statName(statId));
     } catch (e) {
       this._showStatus("error", `Scan failed: ${e.message || JSON.stringify(e)}`);
     } finally {
@@ -1294,7 +1395,9 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
   async _loadHistory() {
     try {
       const result = await this._send({ type: WS.list_fixes, limit: 20 });
-      this._renderHistory(result.fixes || []);
+      this._fixes = result.fixes || [];
+      this._renderHistory(this._fixes);
+      this._renderRecentChips();
     } catch (e) {
       this._q("history-table").innerHTML =
         `<p style="color:var(--error-color)">Failed to load history: ${e.message || e}</p>`;
@@ -1307,8 +1410,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
 
     const rows = fixes.map((f) => {
       const dt = new Date(f.fix_ts * 1000).toLocaleString();
-      const statMeta = this._allStats.find((s) => s.statistic_id === f.statistic_id);
-      const name = statMeta?.name;
+      const name = this._statName(f.statistic_id);
       const sensorCell = name
         ? `<div style="font-weight:500;font-size:0.85rem">${name}</div><div style="font-size:0.75rem;color:var(--secondary-text-color)">${f.statistic_id}</div>`
         : f.statistic_id;

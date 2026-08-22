@@ -430,3 +430,203 @@ describe("date range uses HA's picker when it can be loaded", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Recently fixed sensors, shown as chips under the search bar
+// ---------------------------------------------------------------------------
+
+/**
+ * Mount with a fixed set of WS replies, keyed by command rather than by order.
+ *
+ * The shared `mount()` helper answers from a queue, which makes the reply depend
+ * on which of the two loads the panel happens to issue first.
+ */
+function mountWith({ fixes = [], statistics = [], defineChip = true } = {}) {
+  if (defineChip && !window.customElements.get("ha-assist-chip")) {
+    window.customElements.define(
+      "ha-assist-chip",
+      class extends window.HTMLElement {}
+    );
+  }
+  const el = new PanelElement();
+  el._send = (msg) => {
+    if (msg.type.endsWith("list_fixes")) return Promise.resolve({ fixes });
+    if (msg.type.endsWith("list_sum_statistics")) return Promise.resolve({ statistics });
+    return Promise.resolve({});
+  };
+  window.document.body.appendChild(el);
+  el.narrow = false;
+  el.hass = { states: {} };
+  return el;
+}
+
+/** A fix row as list_fixes returns it: newest first, one row per fix. */
+const fix = (statistic_id, ts) => ({
+  fix_id: `fix-${statistic_id}-${ts}`,
+  statistic_id,
+  fix_ts: ts,
+  row_count: 1,
+});
+
+const chipLabels = (el) =>
+  [...el.shadowRoot.querySelectorAll("#recent-chips [data-statistic-id]")].map(
+    (c) => c.getAttribute("label") || c.textContent.trim()
+  );
+
+const chipIds = (el) =>
+  [...el.shadowRoot.querySelectorAll("#recent-chips [data-statistic-id]")].map(
+    (c) => c.dataset.statisticId
+  );
+
+describe("recently fixed sensors are offered as chips", () => {
+  test("the row stays hidden when nothing has been fixed yet", async () => {
+    const el = mountWith({ fixes: [] });
+    await settle();
+
+    assert.ok(
+      $(el, "recent-chips-row").classList.contains("hidden"),
+      "an empty row would just be dead space"
+    );
+    assert.equal(chipIds(el).length, 0);
+  });
+
+  test("the six most recently fixed sensors are listed, newest first", async () => {
+    const el = mountWith({
+      fixes: [
+        fix("sensor.g", 700),
+        fix("sensor.f", 600),
+        fix("sensor.e", 500),
+        fix("sensor.d", 400),
+        fix("sensor.c", 300),
+        fix("sensor.b", 200),
+        fix("sensor.a", 100),
+      ],
+    });
+    await settle();
+
+    assert.equal($(el, "recent-chips-row").classList.contains("hidden"), false);
+    assert.deepEqual(chipIds(el), [
+      "sensor.g",
+      "sensor.f",
+      "sensor.e",
+      "sensor.d",
+      "sensor.c",
+      "sensor.b",
+    ]);
+  });
+
+  test("a sensor fixed repeatedly appears once, at its most recent position", async () => {
+    const el = mountWith({
+      fixes: [
+        fix("sensor.b", 500),
+        fix("sensor.a", 400),
+        fix("sensor.b", 300),
+        fix("sensor.b", 200),
+        fix("sensor.c", 100),
+      ],
+    });
+    await settle();
+
+    assert.deepEqual(chipIds(el), ["sensor.b", "sensor.a", "sensor.c"]);
+  });
+
+  test("chips are labelled with the friendly name when there is one", async () => {
+    const el = mountWith({
+      fixes: [fix("sensor.solar", 200), fix("sensor.no_name", 100)],
+      statistics: [{ statistic_id: "sensor.solar", name: "Solar Production" }],
+    });
+    await settle();
+
+    assert.deepEqual(chipLabels(el), ["Solar Production", "sensor.no_name"]);
+  });
+
+  test("names appear even when the statistics list resolves after the history", async () => {
+    // The two loads race; the chips must not be stuck showing raw ids.
+    let releaseStats;
+    const el = new PanelElement();
+    el._send = (msg) => {
+      if (msg.type.endsWith("list_fixes")) {
+        return Promise.resolve({ fixes: [fix("sensor.solar", 100)] });
+      }
+      if (msg.type.endsWith("list_sum_statistics")) {
+        return new Promise((r) => {
+          releaseStats = () =>
+            r({ statistics: [{ statistic_id: "sensor.solar", name: "Solar Production" }] });
+        });
+      }
+      return Promise.resolve({});
+    };
+    window.document.body.appendChild(el);
+    el.hass = { states: {} };
+    await settle();
+
+    assert.deepEqual(chipLabels(el), ["sensor.solar"], "no name known yet");
+
+    releaseStats();
+    await settle();
+
+    assert.deepEqual(chipLabels(el), ["Solar Production"]);
+  });
+
+  test("clicking a chip selects that statistic for scanning", async () => {
+    const el = mountWith({
+      fixes: [fix("sensor.solar", 100)],
+      statistics: [{ statistic_id: "sensor.solar", name: "Solar Production" }],
+    });
+    await settle();
+
+    el.shadowRoot.querySelector("#recent-chips [data-statistic-id]").click();
+
+    assert.equal(el._statId, "sensor.solar");
+    assert.equal(
+      $(el, "stat-selected").classList.contains("hidden"),
+      false,
+      "the selected-statistic display should take over from the search input"
+    );
+    assert.equal($(el, "stat-selected-name").textContent, "Solar Production");
+  });
+
+  test("the chips sit directly below the search bar", async () => {
+    const el = mountWith({ fixes: [fix("sensor.solar", 100)] });
+    await settle();
+
+    const wrap = $(el, "stat-wrap");
+    const row = $(el, "recent-chips-row");
+    assert.ok(
+      wrap.compareDocumentPosition(row) & window.Node.DOCUMENT_POSITION_FOLLOWING,
+      "the chip row must come after the statistic search field"
+    );
+    assert.ok(
+      row.compareDocumentPosition($(el, "date-range-wrap")) &
+        window.Node.DOCUMENT_POSITION_FOLLOWING,
+      "and before the date range"
+    );
+  });
+
+  test("applying a fix refreshes the chips", async () => {
+    const el = mountWith({ fixes: [] });
+    await settle();
+    assert.equal(chipIds(el).length, 0);
+
+    // A fix has now been recorded, so the next history load returns it.
+    el._send = (msg) => {
+      if (msg.type.endsWith("list_fixes")) {
+        return Promise.resolve({ fixes: [fix("sensor.new", 900)] });
+      }
+      if (msg.type.endsWith("list_sum_statistics")) return Promise.resolve({ statistics: [] });
+      return Promise.resolve({});
+    };
+    await el._loadHistory();
+    await settle();
+
+    assert.deepEqual(chipIds(el), ["sensor.new"]);
+    assert.equal($(el, "recent-chips-row").classList.contains("hidden"), false);
+  });
+
+  test("real ha-assist-chip elements are used when HA provides them", async () => {
+    const el = mountWith({ fixes: [fix("sensor.solar", 100)], defineChip: true });
+    await settle();
+
+    const chip = el.shadowRoot.querySelector("#recent-chips [data-statistic-id]");
+    assert.equal(chip.tagName.toLowerCase(), "ha-assist-chip");
+  });
+});
