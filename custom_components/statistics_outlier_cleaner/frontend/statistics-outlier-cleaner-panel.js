@@ -89,15 +89,32 @@ const WS = {
 };
 
 const STYLES = `
+  /* ha-panel-custom gives us display:block and safe-area padding but no height,
+     so height:100% here would resolve against an auto-height parent and
+     collapse. The document would scroll instead of us, and a sticky toolbar
+     would pin to that scrollport rather than the viewport. Take a definite
+     height from the viewport, less the insets the container already pads for. */
   :host {
     --soc-toolbar-height: 56px;
-    display: block;
-    height: 100%;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: calc(
+      100dvh - var(--safe-area-inset-top, 0px) - var(--safe-area-inset-bottom, 0px)
+    );
+    overflow: hidden;
+    box-sizing: border-box;
+    font-family: var(--paper-font-body1_-_font-family, inherit);
+    color: var(--primary-text-color);
+  }
+  /* The toolbar is a plain flex row pinned by layout rather than by
+     positioning, and only this pane scrolls. */
+  .panel-content {
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
     box-sizing: border-box;
     padding: 16px;
-    font-family: var(--paper-font-body1_-_font-family, inherit);
-    color: var(--primary-text-color);
     max-width: 1000px;
   }
   h2 { margin: 0 0 16px; font-size: 1.4rem; font-weight: 500; }
@@ -107,14 +124,12 @@ const STYLES = `
      sidebar the panel is a dead end on mobile, where the sidebar is hidden.
      Sticky so it stays reachable however far down the page you are. */
   .app-toolbar {
-    position: sticky;
-    top: 0;
+    flex: 0 0 auto;
     z-index: 4;
     display: flex;
     align-items: center;
     gap: 4px;
     height: var(--soc-toolbar-height);
-    margin: -16px -16px 12px;
     padding: 0 12px;
     box-sizing: border-box;
     background: var(--app-header-background-color, var(--primary-background-color, #fafafa));
@@ -257,8 +272,8 @@ const STYLES = `
   .hidden { display: none !important; }
   table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
   th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--divider-color, #e0e0e0); }
-  /* Offset by the toolbar so a sticky header doesn't slide under it. */
-  th { font-weight: 500; background: var(--secondary-background-color, #f5f5f5); position: sticky; top: var(--soc-toolbar-height); z-index: 1; }
+  /* .panel-content is the scrollport, so the toolbar is already excluded. */
+  th { font-weight: 500; background: var(--secondary-background-color, #f5f5f5); position: sticky; top: 0; z-index: 1; }
   tr:hover td { background: rgba(var(--rgb-primary-color, 3,169,244), 0.05); }
   tr.selected td { background: rgba(var(--rgb-primary-color, 3,169,244), 0.1); }
   td.change-cell { font-family: monospace; }
@@ -560,6 +575,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
 
       <div class="app-toolbar" id="app-toolbar"></div>
 
+      <div class="panel-content" id="panel-content">
       <div class="card">
         <h3>Scan</h3>
 
@@ -655,6 +671,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
         <h3>Fix History</h3>
         <button class="secondary" id="btn-refresh-history" style="margin-bottom:12px">Refresh</button>
         <div id="history-table"></div>
+      </div>
       </div>
     `;
 
