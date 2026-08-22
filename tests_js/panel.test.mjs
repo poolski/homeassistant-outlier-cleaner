@@ -380,4 +380,53 @@ describe("date range uses HA's picker when it can be loaded", () => {
     assert.equal(params.start_ts, startDate.getTime() / 1000);
     assert.equal(params.end_ts, endDate.getTime() / 1000);
   });
+
+  // ha-date-range-picker is a controlled component: picking a range fires
+  // value-changed but does NOT update the element's own startDate/endDate. HA's
+  // own panels re-feed the value through a Lit binding. We have no binding, so
+  // unless we write it back the element keeps displaying — and keeps handing its
+  // inner picker — the range it was mounted with, and the prev/next arrows shift
+  // from that stale range instead of the selected one.
+  test("the selected range is written back to the picker", () => {
+    const picker = el.shadowRoot.querySelector("ha-date-range-picker");
+    const startDate = new Date(2026, 1, 3, 0, 0, 0, 0);
+    const endDate = new Date(2026, 1, 4, 23, 59, 59, 999);
+
+    picker.dispatchEvent(
+      new window.CustomEvent("value-changed", {
+        detail: { value: { startDate, endDate } },
+      })
+    );
+
+    assert.equal(
+      picker.startDate.getTime(),
+      startDate.getTime(),
+      "picker.startDate must reflect the selection or the label shows the old range"
+    );
+    assert.equal(
+      picker.endDate.getTime(),
+      endDate.getTime(),
+      "picker.endDate must reflect the selection or the label shows the old range"
+    );
+  });
+
+  test("a later hass update does not revert the selected range", () => {
+    const picker = el.shadowRoot.querySelector("ha-date-range-picker");
+    const startDate = new Date(2026, 1, 3, 0, 0, 0, 0);
+    const endDate = new Date(2026, 1, 4, 23, 59, 59, 999);
+
+    picker.dispatchEvent(
+      new window.CustomEvent("value-changed", {
+        detail: { value: { startDate, endDate } },
+      })
+    );
+
+    // Every HA state change assigns picker.hass, which re-renders the element
+    // from its own properties.
+    el.hass = { states: {}, marker: "after-selection" };
+
+    assert.equal(picker.startDate.getTime(), startDate.getTime());
+    assert.equal(picker.endDate.getTime(), endDate.getTime());
+  });
 });
+

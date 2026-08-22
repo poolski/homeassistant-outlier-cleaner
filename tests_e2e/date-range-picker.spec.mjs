@@ -68,6 +68,30 @@ async function installDeepQuery(page) {
   });
 }
 
+/**
+ * Wait until the app stops re-navigating.
+ *
+ * Logging in lands on `?auth_callback=1` and HA then navigates again to clean
+ * the URL up. Each navigation builds a brand-new panel element, so anything
+ * that asserts state survives over time has to start after the last one — or it
+ * measures the login redirect rather than the panel.
+ */
+async function settle(page, quietMs = 2000) {
+  let last = Date.now();
+  const bump = (frame) => {
+    if (frame === page.mainFrame()) last = Date.now();
+  };
+  page.on("framenavigated", bump);
+  try {
+    while (Date.now() - last < quietMs) {
+      await page.waitForTimeout(250);
+    }
+  } finally {
+    page.off("framenavigated", bump);
+  }
+  await panel(page);
+}
+
 test.beforeEach(async ({ page }) => {
   await installDeepQuery(page);
   await login(page);
@@ -188,6 +212,71 @@ test("choosing a preset changes the range sent to fetch_outliers", async ({
   expect(after.start_ts).toBeCloseTo(applied.start_ts, 0);
   expect(after.end_ts).toBeCloseTo(applied.end_ts, 0);
   expect(after.start_ts).not.toBeCloseTo(before.start_ts, 0);
+});
+
+test("picking a preset through the real UI updates the picker's own range", async ({
+  page,
+}) => {
+  // The synthetic test above proves our listener works; it cannot prove the
+  // element ever fires the event, nor that the selection sticks. The element is
+  // controlled — it does not update its own startDate/endDate — so without the
+  // panel writing the value back, the field keeps displaying the mounted range
+  // and every `picker.hass` assignment re-renders that stale range.
+  const read = () =>
+    page.evaluate(
+      ({ panelTag, pickerTag }) => {
+        const picker = window
+          .__deepQuery(panelTag)
+          ?.shadowRoot?.querySelector(pickerTag);
+        if (!picker) return null;
+        return {
+          start: picker.startDate?.toISOString?.(),
+          end: picker.endDate?.toISOString?.(),
+          label: picker.shadowRoot
+            ?.querySelector("ha-textarea")
+            ?.value?.replace(/\n/g, " "),
+        };
+      },
+      { panelTag: PANEL_TAG, pickerTag: PICKER_TAG }
+    );
+
+  await settle(page);
+  await expect.poll(async () => Boolean(await read()), { timeout: 20_000 }).toBe(true);
+  const before = await read();
+
+  // Open the dropdown via the field the element renders for that purpose.
+  await page.locator(PICKER_TAG).locator("ha-textarea").first().click();
+
+  const today = page.locator("mwc-list-item", { hasText: "Today" }).first();
+  await expect(today).toBeVisible({ timeout: 20_000 });
+
+  // Click by coordinate: Playwright's actionability retries race with the
+  // dropdown's own open/close handling and can miss the item entirely.
+  const box = await today.boundingBox();
+  expect(box, "the Today preset should have a layout box").not.toBeNull();
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+
+  await expect
+    .poll(async () => (await read())?.start, {
+      timeout: 20_000,
+      message: "the selected range was never written back to the picker",
+    })
+    .not.toBe(before.start);
+
+  const after = await read();
+
+  // "Today" is a single local day.
+  const expected = new Date();
+  expected.setHours(0, 0, 0, 0);
+  expect(new Date(after.start).getTime()).toBe(expected.getTime());
+
+  // The field is what the user reads, so assert it moved too.
+  expect(after.label).not.toBe(before.label);
+
+  // The panel assigns picker.hass on every HA state update, which re-renders the
+  // element from its own properties — the selection has to survive that.
+  await page.waitForTimeout(2000);
+  expect((await read()).start).toBe(after.start);
 });
 
 test("the picker offers the preset rows the panel asks for", async ({ page }) => {

@@ -681,6 +681,14 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
         if (!value) return;
         this._startDate = value.startDate;
         this._endDate = value.endDate;
+        // The element is controlled: it fires this event but does not update its
+        // own startDate/endDate, so HA's panels re-feed the value through a Lit
+        // binding. We have no binding, so write it back by hand - otherwise the
+        // label keeps showing the mounted range, every `picker.hass` assignment
+        // re-renders the stale value into the inner picker, and the prev/next
+        // arrows shift from that stale range rather than the selected one.
+        picker.startDate = value.startDate;
+        picker.endDate = value.endDate;
       });
 
       wrap.replaceChildren(picker);
