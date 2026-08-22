@@ -222,3 +222,162 @@ describe("toolbar is pinned by layout, not by positioning", () => {
     assert.match(bar, /flex:\s*0 0 auto/, "toolbar should be a fixed-size flex row");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Date range
+// ---------------------------------------------------------------------------
+
+/** Capture the params of the next fetch_outliers call. */
+async function scanParams(el) {
+  let captured;
+  const previous = el._send;
+  el._send = (msg) => {
+    if (msg.type.endsWith("fetch_outliers")) {
+      captured = msg;
+      return Promise.resolve({ candidates: [], scanned_rows: 0, method: "absolute" });
+    }
+    return previous(msg);
+  };
+  el._statId = "sensor.test";
+  await el._scan();
+  await settle();
+  return captured;
+}
+
+const startOfDay = (offsetDays) => {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
+
+describe("date range without HA's picker available", () => {
+  // jsdom provides no window.loadCardHelpers, so mounting here is what a panel
+  // looks like before (or without) HA's picker.
+  let el;
+  beforeEach(async () => {
+    el = mount({ narrow: false });
+    await settle();
+  });
+
+  test("no home-grown date inputs are rendered", () => {
+    // The picker is the only date control; there is deliberately no fallback
+    // field of our own to diverge from it.
+    assert.equal(el.shadowRoot.querySelectorAll('input[type="date"]').length, 0);
+    assert.equal($(el, "date-start"), null);
+    assert.equal($(el, "date-end"), null);
+  });
+
+  test("the wrap is left empty for the picker to fill", () => {
+    const wrap = $(el, "date-range-wrap");
+    assert.ok(wrap, "the picker's mount point should exist");
+    assert.equal(wrap.children.length, 0);
+  });
+
+  test("scanning still works, using the default 30-day range", async () => {
+    const params = await scanParams(el);
+
+    // Local midnight, not UTC midnight: parsing "YYYY-MM-DD" as UTC was off by
+    // up to a day for anyone east or west of Greenwich.
+    assert.equal(params.start_ts, startOfDay(-30).getTime() / 1000);
+
+    const endOfToday = startOfDay(1).getTime() / 1000;
+    assert.ok(
+      params.end_ts < endOfToday && endOfToday - params.end_ts < 1,
+      `end_ts ${params.end_ts} should sit just below next local midnight`
+    );
+  });
+
+  test("it keeps retrying as hass updates arrive", async () => {
+    assert.equal(el.shadowRoot.querySelector("ha-date-range-picker"), null);
+
+    // The frontend finishes coming up only now — a cold deep-link into the
+    // panel does exactly this.
+    window.loadCardHelpers = async () => ({
+      createCardElement: async () => {
+        if (!window.customElements.get("ha-date-range-picker")) {
+          window.customElements.define(
+            "ha-date-range-picker",
+            class extends window.HTMLElement {}
+          );
+        }
+        throw new Error("no energy collection configured");
+      },
+    });
+
+    el.hass = { states: {}, marker: "later" };
+    await settle();
+
+    assert.ok(
+      el.shadowRoot.querySelector("ha-date-range-picker"),
+      "a later hass update should mount the picker"
+    );
+    delete window.loadCardHelpers;
+  });
+});
+
+describe("date range uses HA's picker when it can be loaded", () => {
+  let el;
+
+  beforeEach(async () => {
+    // Stand in for HA's lazy-loading path: loadCardHelpers().createCardElement()
+    // is called only for its import side effect, which registers the element.
+    window.loadCardHelpers = async () => ({
+      createCardElement: async () => {
+        if (!window.customElements.get("ha-date-range-picker")) {
+          window.customElements.define(
+            "ha-date-range-picker",
+            class extends window.HTMLElement {}
+          );
+        }
+        // HA's real card throws here without an energy collection; the element
+        // is registered regardless, which is what the panel relies on.
+        throw new Error("no energy collection configured");
+      },
+    });
+    el = mount({ narrow: false });
+    await settle();
+  });
+
+  test("the picker replaces the native inputs", () => {
+    assert.ok(
+      el.shadowRoot.querySelector("ha-date-range-picker"),
+      "picker should be mounted"
+    );
+    assert.equal($(el, "date-start"), null, "native From input should be gone");
+    assert.equal($(el, "date-end"), null, "native To input should be gone");
+  });
+
+  test("the picker is given hass and the current range", () => {
+    const picker = el.shadowRoot.querySelector("ha-date-range-picker");
+
+    assert.ok(picker.hass, "hass must be forwarded or the picker cannot localise");
+    assert.ok(picker.startDate instanceof window.Date || picker.startDate instanceof Date);
+    assert.ok(picker.endDate instanceof window.Date || picker.endDate instanceof Date);
+  });
+
+  test("hass updates are forwarded to the picker", () => {
+    const picker = el.shadowRoot.querySelector("ha-date-range-picker");
+    const next = { states: {}, marker: "second" };
+    el.hass = next;
+
+    assert.equal(picker.hass.marker, "second");
+  });
+
+  test("a value-changed event drives the scanned range", async () => {
+    const picker = el.shadowRoot.querySelector("ha-date-range-picker");
+    const startDate = new Date(2026, 1, 3, 0, 0, 0, 0);
+    const endDate = new Date(2026, 1, 4, 23, 59, 59, 999);
+
+    picker.dispatchEvent(
+      new window.CustomEvent("value-changed", {
+        detail: { value: { startDate, endDate } },
+      })
+    );
+
+    const params = await scanParams(el);
+
+    assert.equal(params.start_ts, startDate.getTime() / 1000);
+    assert.equal(params.end_ts, endDate.getTime() / 1000);
+  });
+});

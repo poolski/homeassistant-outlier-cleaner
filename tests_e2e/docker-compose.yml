@@ -1,0 +1,31 @@
+# Home Assistant with this integration mounted in, for browser tests.
+#
+# thomasloven/hass-custom-devcontainer is used purely for its bootstrap: it
+# generates a config, creates an admin user and skips onboarding, which is what
+# makes an unattended browser test possible. Its Lovelace plugin machinery
+# (LOVELACE_PLUGINS etc.) is irrelevant here — this integration serves its own
+# panel over a static path.
+
+services:
+  homeassistant:
+    image: thomasloven/hass-custom-devcontainer:latest
+    ports:
+      - "${HA_PORT:-8123}:8123"
+    volumes:
+      # The integration under test. Read-write because Python wants to write
+      # __pycache__ next to the sources.
+      - ../custom_components/statistics_outlier_cleaner:/config/custom_components/statistics_outlier_cleaner
+      - ./bootstrap.sh:/bootstrap.sh:ro
+    environment:
+      HASS_USERNAME: "${HASS_USERNAME:-dev}"
+      HASS_PASSWORD: "${HASS_PASSWORD:-dev}"
+      # Set to test against a specific HA release rather than whatever the
+      # image pins. The frontend internals this suite guards are what drift.
+      HA_VERSION: "${HA_VERSION:-}"
+    command: ["bash", "/bootstrap.sh"]
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8123/manifest.json"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s

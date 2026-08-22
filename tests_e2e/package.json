@@ -1,0 +1,16 @@
+{
+  "name": "statistics-outlier-cleaner-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Browser tests against a real Home Assistant. Run on demand, not in CI.",
+  "scripts": {
+    "up": "docker compose up -d --wait",
+    "down": "docker compose down -v",
+    "logs": "docker compose logs -f homeassistant",
+    "test": "playwright test",
+    "e2e": "npm run up && npm test; npm run down"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.0"
+  }
+}

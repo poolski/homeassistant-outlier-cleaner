@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import time
 import uuid
@@ -35,6 +36,9 @@ from .db import (
     restore_fix_sync,
 )
 from .outlier import get_sum_statistic_ids, scan_outliers
+from .paths import DatabaseNotSupportedError, resolve_sqlite_path
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @callback
@@ -156,7 +160,12 @@ async def ws_apply_fix(
         )
         return
 
-    db_path = _get_db_path(hass)
+    try:
+        db_path = _get_db_path(hass)
+    except DatabaseNotSupportedError as exc:
+        connection.send_error(msg["id"], websocket_api.ERR_NOT_SUPPORTED, str(exc))
+        return
+
     fix_id = str(uuid.uuid4())
     fix_ts = time.time()
 
@@ -200,7 +209,11 @@ async def ws_list_fixes(
     msg: dict[str, Any],
 ) -> None:
     """Return a summary of recent fixes."""
-    db_path = _get_db_path(hass)
+    try:
+        db_path = _get_db_path(hass)
+    except DatabaseNotSupportedError as exc:
+        connection.send_error(msg["id"], websocket_api.ERR_NOT_SUPPORTED, str(exc))
+        return
 
     def _run_sync() -> list[dict[str, Any]]:
         conn = sqlite3.connect(db_path)
@@ -233,7 +246,11 @@ async def ws_restore_fix(
     msg: dict[str, Any],
 ) -> None:
     """Restore the database rows backed up under fix_id."""
-    db_path = _get_db_path(hass)
+    try:
+        db_path = _get_db_path(hass)
+    except DatabaseNotSupportedError as exc:
+        connection.send_error(msg["id"], websocket_api.ERR_NOT_SUPPORTED, str(exc))
+        return
 
     def _run_sync() -> dict[str, Any]:
         conn = sqlite3.connect(db_path)
@@ -253,8 +270,12 @@ async def ws_restore_fix(
 
 
 def _get_db_path(hass: HomeAssistant) -> str:
-    """Return the absolute path to home-assistant_v2.db."""
-    return str(hass.config.path("home-assistant_v2.db"))
+    """Return the path to the recorder's SQLite database.
+
+    Raises DatabaseNotSupportedError if the recorder is not on file-backed
+    SQLite.
+    """
+    return resolve_sqlite_path(hass)
 
 
 async def _resolve_metadata_id(
@@ -267,7 +288,6 @@ async def _resolve_metadata_id(
     falls back to a raw SQL query against statistics_meta.
     """
     recorder = get_instance(hass)
-    db_path = _get_db_path(hass)
 
     def _fetch() -> int | None:
         try:
@@ -287,7 +307,9 @@ async def _resolve_metadata_id(
                 "ORM metadata lookup failed for %r, falling back to raw SQL",
                 statistic_id,
             )
-            conn = sqlite3.connect(db_path)
+            # Resolved here rather than up front so the normal ORM path never
+            # depends on the database being file-backed SQLite.
+            conn = sqlite3.connect(_get_db_path(hass))
             conn.row_factory = sqlite3.Row
             try:
                 return resolve_metadata_id_sync(conn, statistic_id)

@@ -1,0 +1,32 @@
+# Publishes releases for HACS.
+#
+# HACS takes the version it shows users from the release tag, and tags alone are
+# not enough - it needs a published release. So this owns both, and owns the
+# `version` in manifest.json with it, via extra-files in
+# release-please-config.json. That is the number that used to be bumped by hand
+# and drift from the tag.
+#
+# On push to main, release-please opens (or updates) a release PR with the next
+# version and a changelog. Merging that PR is what tags and publishes.
+
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

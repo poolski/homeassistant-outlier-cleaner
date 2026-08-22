@@ -946,3 +946,103 @@ class TestDryRunQueries:
             dry_run=False,
         )
         assert result["queries"] == []
+
+
+class TestRestoreFixSyncOverlappingBackups:
+    """Restoring a fix whose candidates had overlapping cascade ranges.
+
+    Fixing two candidates in one call backs up every row at or after each
+    candidate, so rows after the *second* candidate get backed up twice: once
+    holding their true original value, and once holding the intermediate value
+    left by the first candidate's cascade. Restore has to prefer the original.
+
+    This is the bounded-spike case the README advertises as a headline feature,
+    so it is the most likely way for a user to hit it.
+    """
+
+    ORIGINAL = [
+        #  start_ts   state         sum
+        (0.0,     100.0,       100.0),        # baseline
+        (3600.0,  1_000_100.0, 1_000_100.0),  # spike UP
+        (7200.0,  101.0,       101.0),        # compensating drop
+        (10800.0, 102.0,       102.0),        # normal
+        (14400.0, 103.0,       103.0),        # normal
+    ]
+
+    @pytest.fixture
+    def preloaded_conn(self, conn):
+        _insert_meta(conn, 1)
+        ensure_backup_table(conn)
+        _insert_lts(conn, 1, list(self.ORIGINAL))
+        return conn
+
+    def test_restore_returns_the_original_values_not_the_intermediate_ones(
+        self, preloaded_conn
+    ):
+        fix_id = _fix_id()
+        apply_fix_sync(
+            preloaded_conn,
+            statistic_id="sensor.test",
+            metadata_id=1,
+            candidates=[
+                {"start_ts": 3600.0, "period": "hour"},
+                {"start_ts": 7200.0, "period": "hour"},
+            ],
+            replacement=0.0,
+            fix_id=fix_id,
+            fix_ts=time.time(),
+        )
+
+        # Sanity: the fix actually changed something.
+        assert [r["sum"] for r in _lts_rows(preloaded_conn, 1)] != [
+            row[2] for row in self.ORIGINAL
+        ]
+
+        restore_fix_sync(preloaded_conn, fix_id)
+
+        assert [r["sum"] for r in _lts_rows(preloaded_conn, 1)] == pytest.approx(
+            [row[2] for row in self.ORIGINAL]
+        )
+        assert [r["state"] for r in _lts_rows(preloaded_conn, 1)] == pytest.approx(
+            [row[1] for row in self.ORIGINAL]
+        )
+
+    def test_restore_reports_distinct_rows_not_backup_entries(self, preloaded_conn):
+        """The count is rows put back, not backup entries consumed."""
+        fix_id = _fix_id()
+        apply_fix_sync(
+            preloaded_conn,
+            statistic_id="sensor.test",
+            metadata_id=1,
+            candidates=[
+                {"start_ts": 3600.0, "period": "hour"},
+                {"start_ts": 7200.0, "period": "hour"},
+            ],
+            replacement=0.0,
+            fix_id=fix_id,
+            fix_ts=time.time(),
+        )
+        result = restore_fix_sync(preloaded_conn, fix_id)
+
+        # Rows at or after 3600.0: four of them. The backup table holds more
+        # than that because of the overlap.
+        assert result["restored"] == 4
+        assert result["errors"] == []
+
+    def test_backup_entries_are_cleared_after_restore(self, preloaded_conn):
+        fix_id = _fix_id()
+        apply_fix_sync(
+            preloaded_conn,
+            statistic_id="sensor.test",
+            metadata_id=1,
+            candidates=[
+                {"start_ts": 3600.0, "period": "hour"},
+                {"start_ts": 7200.0, "period": "hour"},
+            ],
+            replacement=0.0,
+            fix_id=fix_id,
+            fix_ts=time.time(),
+        )
+        restore_fix_sync(preloaded_conn, fix_id)
+
+        assert _backup_rows(preloaded_conn) == []

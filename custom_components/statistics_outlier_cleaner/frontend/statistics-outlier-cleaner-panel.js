@@ -2,13 +2,44 @@
  * Statistics Outlier Cleaner — sidebar panel
  *
  * Vanilla web component, no build step required.
- * Uses native HTML controls for statistic selection and date range —
- * ha-statistic-picker and ha-date-range-picker are lazy-loaded by HA only
- * when the Statistics dev-tools view is opened, so they are never available
- * in a custom panel context.
+ *
+ * The statistic selector is a native control: ha-statistic-picker is lazy-loaded
+ * by HA only when the Statistics dev-tools view is opened, so it is not
+ * available here.
+ *
+ * ha-date-range-picker is reachable, though, because loading any Lovelace card
+ * that uses it registers it as an import side effect — see
+ * _ensureDateRangePicker(). That depends on HA frontend internals, so the native
+ * date inputs remain as a fallback and are what renders on first paint.
  */
 
 const DOMAIN = "statistics_outlier_cleaner";
+
+// Any Lovelace card whose module imports ha-date-range-picker will do; the
+// energy date selection card is the shortest path to it.
+const DATE_PICKER_HOST_CARD = "energy-date-selection";
+const DATE_PICKER_TAG = "ha-date-range-picker";
+const DATE_PICKER_LOAD_TIMEOUT_MS = 15_000;
+// Retries are cheap; a frontend that has not produced the element after this
+// many state updates is not going to.
+const DATE_PICKER_MAX_ATTEMPTS = 20;
+
+const DEFAULT_RANGE_DAYS = 30;
+
+/** Local midnight, `offsetDays` from today. */
+function startOfLocalDay(offsetDays = 0) {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+/** The last representable instant of the given day, in local time. */
+function endOfLocalDay(date) {
+  const d = new Date(date);
+  d.setHours(23, 59, 59, 999);
+  return d;
+}
 
 const METHOD_HELP = {
   mad: {
@@ -481,8 +512,13 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     this._candidates = [];
     this._selected = new Set();
     this._msgId = 1;
-    this._startDate = null;
-    this._endDate = null;
+    // Single source of truth for the scan range. Seeded so a scan works even
+    // before HA's picker has finished loading.
+    this._startDate = startOfLocalDay(-DEFAULT_RANGE_DAYS);
+    this._endDate = endOfLocalDay(startOfLocalDay(0));
+    this._pickerMounted = false;
+    this._pickerLoading = false;
+    this._pickerAttempts = 0;
     this._statId = null;
     this._allStats = [];      // full list from WS
     this._activeIdx = -1;     // keyboard nav index in dropdown
@@ -504,7 +540,18 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
       this._render();
       this._loadStatistics();
       this._loadHistory();
+      this._setupDateRangePicker();
+      return;
     }
+    // HA replaces the hass object on every state change. The picker needs the
+    // current one to localise and to know the first day of the week.
+    const picker = this.shadowRoot.querySelector(DATE_PICKER_TAG);
+    if (picker) {
+      picker.hass = hass;
+      return;
+    }
+    // Not up yet — these updates are also the retry clock for loading it.
+    this._setupDateRangePicker();
   }
 
   // HA sets this on custom panels and updates it as the viewport changes. It is
@@ -563,10 +610,84 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
   // Rendering
   // ---------------------------------------------------------------------------
 
-  _defaultDateStr(offsetDays) {
-    const d = new Date();
-    d.setDate(d.getDate() + offsetDays);
-    return d.toISOString().slice(0, 10);
+  // ---------------------------------------------------------------------------
+  // Date range
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Register ha-date-range-picker, which HA does not load for custom panels.
+   *
+   * Creating a card element that depends on it is enough: the card module's
+   * static imports run on load, and registering the element is one of them. The
+   * card itself is discarded — and it throws on setConfig without an energy
+   * collection, which is fine and expected.
+   */
+  async _ensureDateRangePicker() {
+    if (customElements.get(DATE_PICKER_TAG)) return true;
+    // HA defines this once the frontend bundle is up; on a cold deep-link into
+    // the panel it can arrive after our first render.
+    if (typeof window.loadCardHelpers !== "function") return false;
+
+    try {
+      const helpers = await window.loadCardHelpers();
+      try {
+        await helpers.createCardElement({ type: DATE_PICKER_HOST_CARD });
+      } catch (_) {
+        // Only the import side effect matters.
+      }
+      // Generous, because this is a chunk fetch: a busy or low-powered instance
+      // can take seconds, and giving up early leaves the panel with no date
+      // control at all.
+      await Promise.race([
+        customElements.whenDefined(DATE_PICKER_TAG),
+        new Promise((_, reject) =>
+          setTimeout(reject, DATE_PICKER_LOAD_TIMEOUT_MS, new Error("timeout"))
+        ),
+      ]);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /**
+   * Mount HA's picker, retrying while the frontend finishes coming up.
+   *
+   * There is no fallback control by design, so this has to keep trying rather
+   * than give up after one attempt. Retries are driven by `set hass`, which HA
+   * calls on every state change, and capped so a genuinely broken frontend does
+   * not spin forever.
+   */
+  async _setupDateRangePicker() {
+    if (this._pickerMounted || this._pickerLoading) return;
+    if (this._pickerAttempts >= DATE_PICKER_MAX_ATTEMPTS) return;
+
+    this._pickerLoading = true;
+    this._pickerAttempts += 1;
+    try {
+      if (!(await this._ensureDateRangePicker())) return;
+
+      const wrap = this._q("date-range-wrap");
+      if (!wrap || wrap.querySelector(DATE_PICKER_TAG)) return;
+
+      const picker = document.createElement(DATE_PICKER_TAG);
+      picker.hass = this._hass;
+      picker.startDate = this._startDate;
+      picker.endDate = this._endDate;
+      // Leaving `ranges` unset is what makes the element build its own presets.
+      picker.extendedPresets = true;
+      picker.addEventListener("value-changed", (e) => {
+        const value = e.detail?.value;
+        if (!value) return;
+        this._startDate = value.startDate;
+        this._endDate = value.endDate;
+      });
+
+      wrap.replaceChildren(picker);
+      this._pickerMounted = true;
+    } finally {
+      this._pickerLoading = false;
+    }
   }
 
   _render() {
@@ -592,16 +713,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
           </div>
         </div>
 
-        <div class="form-row">
-          <div class="form-group">
-            <label>From</label>
-            <input type="date" id="date-start" value="${this._defaultDateStr(-30)}">
-          </div>
-          <div class="form-group">
-            <label>To</label>
-            <input type="date" id="date-end" value="${this._defaultDateStr(0)}">
-          </div>
-        </div>
+        <div class="form-row" id="date-range-wrap"></div>
 
         <div class="form-row">
           <div class="form-group">
@@ -942,8 +1054,6 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     if (!statId) { this._showStatus("error", "Select a statistic first."); return; }
 
     const method = this._getMethod();
-    const startVal = this._q("date-start").value;
-    const endVal   = this._q("date-end").value;
 
     const params = {
       type: WS.fetch_outliers,
@@ -952,13 +1062,10 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
       method,
     };
 
-    if (startVal) {
-      params.start_ts = new Date(startVal).getTime() / 1000;
-    }
-    if (endVal) {
-      // Add 86400 so the selected end date is fully included (date input gives midnight UTC).
-      params.end_ts = new Date(endVal).getTime() / 1000 + 86_400;
-    }
+    // Both controls keep _startDate/_endDate current, and _endDate is already
+    // the last instant of its day, so no end-of-day adjustment is needed here.
+    if (this._startDate) params.start_ts = this._startDate.getTime() / 1000;
+    if (this._endDate) params.end_ts = this._endDate.getTime() / 1000;
 
     if (method === "mad")      params.mad_factor = parseFloat(this._q("mad-factor").value) || 6;
     if (method === "absolute") params.threshold  = parseFloat(this._q("threshold").value) || 0;
