@@ -37,7 +37,7 @@ Unlike the built-in Developer Tools > Statistics dialog, this integration:
 
 1. Copy the `custom_components/statistics_outlier_cleaner` directory into your HA config folder:
 
-   ```
+   ```text
    <config>/custom_components/statistics_outlier_cleaner/
    ```
 
@@ -57,7 +57,7 @@ Unlike the built-in Developer Tools > Statistics dialog, this integration:
 
 After installation a new **Outlier Cleaner** entry appears in the sidebar (admin only).
 
-1. Pick a statistic from the autocomplete picker (only sum-capable statistics are shown).
+1. Pick a statistic from the entity picker (only sum-capable statistics are offered; recent picks show as chips above it).
 2. Select a date range.
 3. Choose a detection method and click **Scan**.
 4. Check the rows you want to fix. Nothing is selected for you — a scan returns suggestions, and `top_n` in particular always returns N rows whether or not the data is clean. Set a replacement change value (default `0` removes the spike entirely).
