@@ -138,11 +138,13 @@ def test_panel_class_name(panel_js):
     assert "StatisticsOutlierCleanerPanel" in panel_js
 
 
-def test_panel_uses_statistic_autocomplete(panel_js):
-    # Native autocomplete driven by list_sum_statistics WS command
+def test_panel_uses_ha_entity_picker(panel_js):
+    # HA's own entity picker, with a plain text fallback. list_sum_statistics
+    # still feeds the picker's allow-list.
     assert "list_sum_statistics" in panel_js
+    assert "ha-entity-picker" in panel_js
     assert "stat-input" in panel_js
-    assert "stat-dropdown" in panel_js
+    assert "stat-dropdown" not in panel_js
 
 
 def test_panel_uses_ha_date_range_picker(panel_js):
