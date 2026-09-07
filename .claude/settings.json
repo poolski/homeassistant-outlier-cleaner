@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(gh pr create*)",
+            "command": "cmd=$(jq -r '.tool_input.command // \"\"'); case \"$cmd\" in *BUMP_CONFIRMED=1*) exit 0;; esac; printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"release-please derives the version bump from Conventional Commit prefixes on the merged PR. Before opening this PR: (1) ask the user whether this is a MINOR release (new feature -> feat:) or a PATCH release (fix -> fix:); (2) make sure the PR title and commits use the matching prefix so autorelease increments the right part; (3) then re-run the exact command with the prefix BUMP_CONFIRMED=1 to bypass this gate.\"}}'"
+          }
+        ]
+      }
+    ]
+  }
+}
