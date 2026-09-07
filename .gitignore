@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 .venv/
 .claude/
+!.claude/settings.json
 node_modules/
 tests_e2e/test-results/
 tests_e2e/playwright-report/
