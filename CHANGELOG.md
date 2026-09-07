@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/poolski/homeassistant-outlier-cleaner/compare/v0.2.0...v0.3.0) (2026-09-07)
+
+
+### Features
+
+* use HA's entity picker for statistic selection ([a790322](https://github.com/poolski/homeassistant-outlier-cleaner/commit/a790322547139932a0e6ab481720734c6143749d))
+
+
+### Bug Fixes
+
+* refresh the date range field after a selection ([fd266dc](https://github.com/poolski/homeassistant-outlier-cleaner/commit/fd266dcb14a75ca706a22aaa1d4ed85bc7dba244))
+
 ## [0.2.0](https://github.com/poolski/homeassistant-outlier-cleaner/compare/v0.1.22...v0.2.0) (2026-08-22)
 
 

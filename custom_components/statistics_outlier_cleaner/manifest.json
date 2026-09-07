@@ -15,5 +15,5 @@
   "documentation": "https://github.com/poolski/homeassistant-outlier-cleaner",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/poolski/homeassistant-outlier-cleaner/issues",
-  "version": "0.2.0"
+  "version": "0.3.0"
 }
