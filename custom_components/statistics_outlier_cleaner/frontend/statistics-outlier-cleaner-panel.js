@@ -681,6 +681,10 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
         if (!value) return;
         this._startDate = value.startDate;
         this._endDate = value.endDate;
+        // The element fires the event but does not update its own startDate /
+        // endDate — without this the field keeps showing the previous range.
+        picker.startDate = value.startDate;
+        picker.endDate = value.endDate;
       });
 
       wrap.replaceChildren(picker);

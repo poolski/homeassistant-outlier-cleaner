@@ -380,4 +380,22 @@ describe("date range uses HA's picker when it can be loaded", () => {
     assert.equal(params.start_ts, startDate.getTime() / 1000);
     assert.equal(params.end_ts, endDate.getTime() / 1000);
   });
+
+  test("the selection is written back so the picker's own field refreshes", () => {
+    // HA's ha-date-range-picker fires value-changed but does not update its own
+    // startDate/endDate — the consumer has to feed them back or the field keeps
+    // showing the previous range.
+    const picker = el.shadowRoot.querySelector("ha-date-range-picker");
+    const startDate = new Date(2026, 1, 3, 0, 0, 0, 0);
+    const endDate = new Date(2026, 1, 3, 23, 59, 59, 999);
+
+    picker.dispatchEvent(
+      new window.CustomEvent("value-changed", {
+        detail: { value: { startDate, endDate } },
+      })
+    );
+
+    assert.equal(picker.startDate, startDate);
+    assert.equal(picker.endDate, endDate);
+  });
 });
