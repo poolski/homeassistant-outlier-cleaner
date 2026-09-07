@@ -1,36 +1,36 @@
 #!/bin/bash
 # Prepare and launch Home Assistant with statistics_outlier_cleaner enabled.
 #
-# The image's `container` entrypoint does setup and launch in one shot, with no
-# hook in between. We need one: the integration is YAML-configured, and the
-# configuration.yaml it writes does not exist until setup has run. Hence
-# setup -> edit -> launch rather than the default `container`.
+# The official image expects the onboarding wizard to create the first user.
+# These tests run unattended, so stand in for it: generate a config, add the
+# login user, and mark onboarding done. Everything here is idempotent so
+# `npm run up` can be re-run against a persisted config volume.
 set -euo pipefail
 
 CONFIG_DIR=/config
 CONFIG_FILE="${CONFIG_DIR}/configuration.yaml"
+USERNAME="${HASS_USERNAME:-dev}"
+PASSWORD="${HASS_PASSWORD:-dev}"
 
-if [[ -n "${HA_VERSION:-}" ]]; then
-    echo "Installing homeassistant==${HA_VERSION}"
-    uv pip install --quiet "homeassistant==${HA_VERSION}"
+hass --script ensure_config -c "${CONFIG_DIR}"
+
+if ! hass --script auth -c "${CONFIG_DIR}" list | grep -qx "${USERNAME}"; then
+    echo "Creating Home Assistant user ${USERNAME}"
+    hass --script auth -c "${CONFIG_DIR}" add "${USERNAME}" "${PASSWORD}"
 fi
 
-# `sudo -E` is not enough: sudoers' secure_path replaces PATH regardless, which
-# drops the image's virtualenv and makes `hass` unfindable. The image's own
-# CMD (`sudo -E container`) hits this too. Re-inject PATH explicitly.
-as_root() {
-    sudo -E env "PATH=${PATH}" "$@"
-}
+mkdir -p "${CONFIG_DIR}/.storage"
+if [[ ! -f "${CONFIG_DIR}/.storage/onboarding" ]]; then
+    echo "Marking onboarding done"
+    cat > "${CONFIG_DIR}/.storage/onboarding" <<'EOF'
+{"data": {"done": ["user", "core_config", "integration"]}, "key": "onboarding", "version": 3}
+EOF
+fi
 
-as_root container setup
-
-# Idempotent: the config directory is a named volume on repeat runs.
-if ! sudo grep -q '^statistics_outlier_cleaner:' "${CONFIG_FILE}"; then
+if ! grep -q '^statistics_outlier_cleaner:' "${CONFIG_FILE}"; then
     echo "Enabling statistics_outlier_cleaner in configuration.yaml"
-    printf '\nstatistics_outlier_cleaner:\n' | sudo tee -a "${CONFIG_FILE}" >/dev/null
+    printf '\nstatistics_outlier_cleaner:\n' >> "${CONFIG_FILE}"
 fi
 
-echo "Home Assistant version: $(hass --version 2>/dev/null || echo unknown)"
-# exec cannot run a shell function, so spell it out to keep HA as PID 1's child
-# and let signals reach it.
-exec sudo -E env "PATH=${PATH}" container launch
+echo "Home Assistant version: $(hass --version)"
+exec hass -c "${CONFIG_DIR}"

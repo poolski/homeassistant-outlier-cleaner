@@ -3,14 +3,13 @@
  *
  * Vanilla web component, no build step required.
  *
- * The statistic selector is a native control: ha-statistic-picker is lazy-loaded
- * by HA only when the Statistics dev-tools view is opened, so it is not
- * available here.
- *
- * ha-date-range-picker is reachable, though, because loading any Lovelace card
- * that uses it registers it as an import side effect — see
- * _ensureDateRangePicker(). That depends on HA frontend internals, so the native
- * date inputs remain as a fallback and are what renders on first paint.
+ * The statistic and date-range fields are HA's own components — ha-entity-picker
+ * and ha-date-range-picker. Neither is loaded by HA for a custom panel, but both
+ * are reachable: loading any Lovelace card whose module (or config editor)
+ * imports them registers them as an import side effect. See _ensureEntityPicker()
+ * and _ensureDateRangePicker(). That depends on HA frontend internals, so each
+ * field has a plain fallback that renders on first paint and stays if the load
+ * never completes.
  */
 
 const DOMAIN = "statistics_outlier_cleaner";
@@ -23,6 +22,17 @@ const DATE_PICKER_LOAD_TIMEOUT_MS = 15_000;
 // Retries are cheap; a frontend that has not produced the element after this
 // many state updates is not going to.
 const DATE_PICKER_MAX_ATTEMPTS = 20;
+
+// ha-entity-picker is imported by the entities card's config editor, so building
+// that card and asking it for its config element is enough to register it.
+const ENTITY_PICKER_HOST_CARD = "entities";
+const ENTITY_PICKER_TAG = "ha-entity-picker";
+const ENTITY_PICKER_MAX_ATTEMPTS = 20;
+
+// A statistic id is an entity id when it has a domain.object_id shape. External
+// long-term statistics use a "source:object_id" form and have no entity, so they
+// cannot appear in an entity picker.
+const ENTITY_ID_RE = /^[a-z0-9_]+\.[a-z0-9_]+$/;
 
 const DEFAULT_RANGE_DAYS = 30;
 
@@ -213,66 +223,18 @@ const STYLES = `
   select { min-width: 160px; }
   input[type=number] { width: 100px; }
   input[type=date] { width: 160px; }
-  .stat-autocomplete {
-    position: relative;
+  .stat-field {
     flex: 1;
     min-width: 280px;
   }
-  .stat-autocomplete input[type=text] {
-    width: 100%;
-    box-sizing: border-box;
+  .stat-field input[type=text] { width: 100%; box-sizing: border-box; }
+  .stat-field ha-entity-picker { display: block; width: 100%; }
+  .stat-recents {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 6px;
   }
-  .stat-autocomplete input[type=text].loading {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='10' fill='none' stroke='%23ccc' stroke-width='3'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 8px center;
-  }
-  .stat-dropdown {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-    background: var(--card-background-color, #fff);
-    border: 1px solid var(--divider-color, #e0e0e0);
-    border-top: none;
-    border-radius: 0 0 4px 4px;
-    max-height: 220px;
-    overflow-y: auto;
-    z-index: 100;
-    box-shadow: 0 4px 8px rgba(0,0,0,.1);
-  }
-  .stat-dropdown.hidden { display: none; }
-  .stat-section-label {
-    padding: 6px 10px 4px;
-    font-size: 0.7rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--secondary-text-color);
-    background: var(--secondary-background-color, #f5f5f5);
-    position: sticky;
-    top: 0;
-    z-index: 1;
-  }
-  .stat-option {
-    padding: 7px 10px;
-    cursor: pointer;
-    font-size: 0.875rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    line-height: 1.4;
-  }
-  .stat-option small { display: block; font-size: 0.75rem; color: var(--secondary-text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .stat-option:hover, .stat-option.active {
-    background: rgba(var(--rgb-primary-color, 3,169,244), 0.1);
-  }
-  .stat-option.no-results {
-    color: var(--secondary-text-color);
-    cursor: default;
-    font-style: italic;
-  }
-  .stat-option.recent-item { display: flex; align-items: flex-start; gap: 7px; }
-  .stat-recent-icon { flex-shrink: 0; opacity: 0.45; font-size: 0.9rem; line-height: 1.4; }
   button {
     padding: 0 16px;
     height: 36px;
@@ -460,20 +422,6 @@ const STYLES = `
     background: rgba(var(--rgb-primary-color, 3,169,244), 0.08);
     color: var(--primary-text-color);
   }
-  .stat-selected-display {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0 10px;
-    border: 1px solid var(--divider-color, #e0e0e0);
-    border-radius: 4px;
-    background: var(--card-background-color, #fff);
-    height: 40px;
-    box-sizing: border-box;
-    width: 100%;
-  }
-  .stat-sel-name { font-size: 0.9rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .stat-sel-id { font-size: 0.75rem; color: var(--secondary-text-color); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .scan-stats-row {
     display: flex;
     gap: 12px;
@@ -519,18 +467,13 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     this._pickerMounted = false;
     this._pickerLoading = false;
     this._pickerAttempts = 0;
+    this._entityPickerMounted = false;
+    this._entityPickerLoading = false;
+    this._entityPickerAttempts = 0;
     this._statId = null;
-    this._allStats = [];      // full list from WS
-    this._activeIdx = -1;     // keyboard nav index in dropdown
+    this._allStats = [];      // full list from WS, used for the picker allow-list
     this._recentStats = this._loadRecentStats();
     this._narrow = undefined;   // set by HA; undefined means "not told yet"
-    this._onDocClick = (e) => {
-      if (!this.shadowRoot.contains(e.target)) this._closeDropdown();
-    };
-  }
-
-  disconnectedCallback() {
-    document.removeEventListener("click", this._onDocClick);
   }
 
   set hass(hass) {
@@ -541,17 +484,14 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
       this._loadStatistics();
       this._loadHistory();
       this._setupDateRangePicker();
+      this._setupEntityPicker();
       return;
     }
-    // HA replaces the hass object on every state change. The picker needs the
-    // current one to localise and to know the first day of the week.
-    const picker = this.shadowRoot.querySelector(DATE_PICKER_TAG);
-    if (picker) {
-      picker.hass = hass;
-      return;
-    }
-    // Not up yet — these updates are also the retry clock for loading it.
-    this._setupDateRangePicker();
+    // Every HA state change is a retry tick for a field whose HA component has
+    // not loaded yet. Both components read locale and config from HA context, so
+    // there is nothing to forward once they are mounted.
+    if (!this._pickerMounted) this._setupDateRangePicker();
+    if (!this._entityPickerMounted) this._setupEntityPicker();
   }
 
   // HA sets this on custom panels and updates it as the viewport changes. It is
@@ -567,7 +507,8 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
   }
 
   // ---------------------------------------------------------------------------
-  // Load statistics list for autocomplete
+  // Statistics list — drives the entity picker's allow-list and resolves names
+  // in the fix history
   // ---------------------------------------------------------------------------
 
   async _loadStatistics() {
@@ -583,6 +524,16 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     } catch (e) {
       this._allStats = [];
     }
+    // The list usually arrives after the picker has mounted.
+    const picker = this.shadowRoot?.querySelector(ENTITY_PICKER_TAG);
+    if (picker) picker.includeEntities = this._entityAllowList();
+  }
+
+  /** Sum statistics that are real entities, for the picker's include list. */
+  _entityAllowList() {
+    return this._allStats
+      .map((s) => s.statistic_id)
+      .filter((id) => ENTITY_ID_RE.test(id));
   }
 
   // ---------------------------------------------------------------------------
@@ -671,7 +622,6 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
       if (!wrap || wrap.querySelector(DATE_PICKER_TAG)) return;
 
       const picker = document.createElement(DATE_PICKER_TAG);
-      picker.hass = this._hass;
       picker.startDate = this._startDate;
       picker.endDate = this._endDate;
       // Leaving `ranges` unset is what makes the element build its own presets.
@@ -681,12 +631,123 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
         if (!value) return;
         this._startDate = value.startDate;
         this._endDate = value.endDate;
+        // The element fires the event but does not update its own startDate /
+        // endDate — without this the field keeps showing the previous range.
+        picker.startDate = value.startDate;
+        picker.endDate = value.endDate;
       });
 
       wrap.replaceChildren(picker);
       this._pickerMounted = true;
     } finally {
       this._pickerLoading = false;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Statistic field
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Register ha-entity-picker, which HA does not load for a custom panel.
+   *
+   * The entities card's config editor imports it, so building that card and
+   * asking it for its config element runs the import as a side effect. The card
+   * and the editor are discarded.
+   */
+  async _ensureEntityPicker() {
+    if (customElements.get(ENTITY_PICKER_TAG)) return true;
+    if (typeof window.loadCardHelpers !== "function") return false;
+
+    try {
+      const helpers = await window.loadCardHelpers();
+      try {
+        const card = await helpers.createCardElement({
+          type: ENTITY_PICKER_HOST_CARD,
+          entities: [],
+        });
+        await card.constructor.getConfigElement();
+      } catch (_) {
+        // Only the import side effect matters.
+      }
+      await Promise.race([
+        customElements.whenDefined(ENTITY_PICKER_TAG),
+        new Promise((_, reject) =>
+          setTimeout(reject, DATE_PICKER_LOAD_TIMEOUT_MS, new Error("timeout"))
+        ),
+      ]);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /**
+   * Swap the plain text field for ha-entity-picker, retrying while the frontend
+   * comes up. Driven by `set hass` and capped like the date picker.
+   */
+  async _setupEntityPicker() {
+    if (this._entityPickerMounted || this._entityPickerLoading) return;
+    if (this._entityPickerAttempts >= ENTITY_PICKER_MAX_ATTEMPTS) return;
+
+    this._entityPickerLoading = true;
+    this._entityPickerAttempts += 1;
+    try {
+      if (!(await this._ensureEntityPicker())) return;
+
+      const wrap = this._q("stat-wrap");
+      if (!wrap || wrap.querySelector(ENTITY_PICKER_TAG)) return;
+
+      const picker = document.createElement(ENTITY_PICKER_TAG);
+      picker.label = "Statistic";
+      // Let a statistic that has no live entity still be typed in.
+      picker.allowCustomEntity = true;
+      picker.includeEntities = this._entityAllowList();
+      if (this._statId) picker.value = this._statId;
+      picker.addEventListener("value-changed", (e) => {
+        this._statId = e.detail?.value || null;
+      });
+
+      const fallback = this._q("stat-input");
+      if (fallback) fallback.replaceWith(picker);
+      else wrap.appendChild(picker);
+      this._entityPickerMounted = true;
+    } finally {
+      this._entityPickerLoading = false;
+    }
+  }
+
+  /** Render the recent-statistics chip row. */
+  _renderRecents() {
+    const row = this._q("stat-recents");
+    if (!row) return;
+    if (!this._recentStats.length) {
+      row.innerHTML = "";
+      row.classList.add("hidden");
+      return;
+    }
+    row.classList.remove("hidden");
+    row.innerHTML = this._recentStats
+      .map(
+        (s) =>
+          `<button class="text-btn" type="button" data-value="${s.statistic_id}">${
+            s.name || s.statistic_id
+          }</button>`
+      )
+      .join("");
+    row.querySelectorAll("button[data-value]").forEach((b) => {
+      b.addEventListener("click", () => this._pickStat(b.dataset.value));
+    });
+  }
+
+  /** Select a statistic id from outside the picker (a recent chip). */
+  _pickStat(id) {
+    this._statId = id;
+    const picker = this.shadowRoot.querySelector(ENTITY_PICKER_TAG);
+    if (picker) picker.value = id;
+    else {
+      const input = this._q("stat-input");
+      if (input) input.value = id;
     }
   }
 
@@ -701,15 +762,9 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
         <h3>Scan</h3>
 
         <div class="form-row">
-          <div class="form-group stat-autocomplete" id="stat-wrap">
-            <label>Statistic</label>
-            <input type="text" id="stat-input" placeholder="Type to search statistics…" autocomplete="off">
-            <div id="stat-selected" class="stat-selected-display hidden">
-              <span id="stat-selected-name" class="stat-sel-name"></span>
-              <span id="stat-selected-id" class="stat-sel-id"></span>
-              <button class="text-btn" id="btn-clear-stat" type="button" title="Change statistic">✕ Change</button>
-            </div>
-            <div class="stat-dropdown hidden" id="stat-dropdown"></div>
+          <div class="form-group stat-field" id="stat-wrap">
+            <div class="stat-recents hidden" id="stat-recents"></div>
+            <input type="text" id="stat-input" placeholder="Statistic id" autocomplete="off">
           </div>
         </div>
 
@@ -788,6 +843,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     `;
 
     this._renderToolbar();
+    this._renderRecents();
     this._wireEvents();
   }
 
@@ -843,15 +899,14 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     this._q("btn-select-all").addEventListener("click", () => this._selectAll(true));
     this._q("btn-select-none").addEventListener("click", () => this._selectAll(false));
     this._q("btn-refresh-history").addEventListener("click", () => this._loadHistory());
-    this._q("btn-clear-stat").addEventListener("click", () => this._clearStat());
     this._q("replacement").addEventListener("input", () => this._renderApplySummary());
     this._q("dry-run").addEventListener("change", () => this._renderApplySummary());
 
-    const input = this._q("stat-input");
-    input.addEventListener("input", () => this._onStatInput());
-    input.addEventListener("keydown", (e) => this._onStatKeydown(e));
-    input.addEventListener("focus", () => this._showDropdown(input.value));
-    document.addEventListener("click", this._onDocClick);
+    // The fallback text field only matters until ha-entity-picker mounts; a
+    // typed id is read straight off it by _scan().
+    this._q("stat-input")?.addEventListener("input", (e) => {
+      this._statId = e.target.value.trim() || null;
+    });
   }
 
   _q(id) { return this.shadowRoot.getElementById(id); }
@@ -929,115 +984,6 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
   }
 
   // ---------------------------------------------------------------------------
-  // Statistic autocomplete
-  // ---------------------------------------------------------------------------
-
-  _onStatInput() {
-    this._statId = null;   // clear confirmed selection while typing
-    this._showDropdown(this._q("stat-input").value);
-  }
-
-  _showDropdown(filter) {
-    const dd = this._q("stat-dropdown");
-    const term = filter.trim().toLowerCase();
-
-    const statOption = (s) => {
-      const label = s.name
-        ? `<strong>${s.name}</strong><small>${s.statistic_id}</small>`
-        : s.statistic_id;
-      return `<div class="stat-option" data-value="${s.statistic_id}">${label}</div>`;
-    };
-
-    if (!term) {
-      let html = "";
-      if (this._recentStats.length) {
-        html += `<div class="stat-section-label">Recent searches</div>`;
-        html += this._recentStats.map((s) => {
-          const display = s.name || s.statistic_id;
-          const sub = s.name ? `<small>${s.statistic_id}</small>` : "";
-          return `<div class="stat-option recent-item" data-value="${s.statistic_id}">
-            <span class="stat-recent-icon">↺</span>
-            <span>${display}${sub}</span>
-          </div>`;
-        }).join("");
-      }
-      if (this._allStats.length) {
-        if (this._recentStats.length) html += `<div class="stat-section-label">All statistics</div>`;
-        html += this._allStats.slice(0, 50).map(statOption).join("");
-      } else {
-        html += `<div class="stat-option no-results">Loading statistics…</div>`;
-      }
-      dd.innerHTML = html;
-    } else {
-      const matches = this._allStats.filter((s) =>
-        s.statistic_id.toLowerCase().includes(term) ||
-        (s.name || "").toLowerCase().includes(term)
-      );
-      dd.innerHTML = matches.length
-        ? matches.slice(0, 50).map(statOption).join("")
-        : `<div class="stat-option no-results">${this._allStats.length ? "No matches" : "Loading statistics…"}</div>`;
-    }
-
-    dd.querySelectorAll(".stat-option[data-value]").forEach((el) => {
-      el.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        this._selectStat(el.dataset.value);
-      });
-    });
-
-    this._activeIdx = -1;
-    dd.classList.remove("hidden");
-  }
-
-  _onStatKeydown(e) {
-    const dd = this._q("stat-dropdown");
-    const options = [...dd.querySelectorAll(".stat-option[data-value]")];
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      this._activeIdx = Math.min(this._activeIdx + 1, options.length - 1);
-      this._highlightOption(options);
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      this._activeIdx = Math.max(this._activeIdx - 1, 0);
-      this._highlightOption(options);
-    } else if (e.key === "Enter" && this._activeIdx >= 0) {
-      e.preventDefault();
-      this._selectStat(options[this._activeIdx].dataset.value);
-    } else if (e.key === "Escape") {
-      this._closeDropdown();
-    }
-  }
-
-  _highlightOption(options) {
-    options.forEach((el, i) => el.classList.toggle("active", i === this._activeIdx));
-    options[this._activeIdx]?.scrollIntoView({ block: "nearest" });
-  }
-
-  _selectStat(value) {
-    this._statId = value;
-    const statMeta = this._allStats.find((s) => s.statistic_id === value);
-    const name = statMeta?.name;
-    this._q("stat-selected-name").textContent = name || value;
-    this._q("stat-selected-id").textContent = name ? value : "";
-    this._q("stat-input").classList.add("hidden");
-    this._q("stat-selected").classList.remove("hidden");
-    this._closeDropdown();
-  }
-
-  _clearStat() {
-    this._statId = null;
-    this._q("stat-selected").classList.add("hidden");
-    const input = this._q("stat-input");
-    input.classList.remove("hidden");
-    input.value = "";
-    input.focus();
-  }
-
-  _closeDropdown() {
-    this._q("stat-dropdown")?.classList.add("hidden");
-  }
-
-  // ---------------------------------------------------------------------------
   // WS helpers
   // ---------------------------------------------------------------------------
 
@@ -1050,7 +996,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
   // ---------------------------------------------------------------------------
 
   async _scan() {
-    const statId = this._statId || this._q("stat-input").value.trim();
+    const statId = this._statId || this._q("stat-input")?.value.trim() || "";
     if (!statId) { this._showStatus("error", "Select a statistic first."); return; }
 
     const method = this._getMethod();
@@ -1222,7 +1168,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
   async _applyFix() {
     if (!this._selected.size) return;
 
-    const statId = this._statId || this._q("stat-input").value.trim();
+    const statId = this._statId || this._q("stat-input")?.value.trim() || "";
     const replacement = parseFloat(this._q("replacement").value) || 0;
     const dryRun = this._q("dry-run").checked;
 

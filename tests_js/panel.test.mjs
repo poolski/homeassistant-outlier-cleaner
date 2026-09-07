@@ -45,14 +45,17 @@ const CANDIDATES = [
   { start: 1_700_172_800_000, end: 1_700_176_400_000, change: 300, state: 3, period: "hour" },
 ];
 
-/** Mount a panel. `narrow` is left unset unless passed, mirroring HA. */
-function mount({ narrow } = {}) {
+/**
+ * Mount a panel. `narrow` is left unset unless passed, mirroring HA. `stats` is
+ * what `list_sum_statistics` returns; defaults to an empty list.
+ */
+function mount({ narrow, stats = [] } = {}) {
   const el = new PanelElement();
   const queued = [];
   el._send = (msg) => {
     if (queued.length) return Promise.resolve(queued.shift());
     if (msg.type.endsWith("list_fixes")) return Promise.resolve({ fixes: [] });
-    if (msg.type.endsWith("list_sum_statistics")) return Promise.resolve({ statistics: [] });
+    if (msg.type.endsWith("list_sum_statistics")) return Promise.resolve({ statistics: stats });
     return Promise.resolve({});
   };
   el._queue = queued;
@@ -348,20 +351,25 @@ describe("date range uses HA's picker when it can be loaded", () => {
     assert.equal($(el, "date-end"), null, "native To input should be gone");
   });
 
-  test("the picker is given hass and the current range", () => {
+  test("the picker is given the current range and no hass", () => {
     const picker = el.shadowRoot.querySelector("ha-date-range-picker");
 
-    assert.ok(picker.hass, "hass must be forwarded or the picker cannot localise");
+    // The element reads locale and config from HA context, not a hass property.
+    assert.equal(picker.hass, undefined, "nothing should be forwarded as hass");
     assert.ok(picker.startDate instanceof window.Date || picker.startDate instanceof Date);
     assert.ok(picker.endDate instanceof window.Date || picker.endDate instanceof Date);
   });
 
-  test("hass updates are forwarded to the picker", () => {
+  test("a later hass update leaves the mounted picker alone", () => {
     const picker = el.shadowRoot.querySelector("ha-date-range-picker");
-    const next = { states: {}, marker: "second" };
-    el.hass = next;
+    el.hass = { states: {}, marker: "second" };
 
-    assert.equal(picker.hass.marker, "second");
+    assert.equal(
+      el.shadowRoot.querySelector("ha-date-range-picker"),
+      picker,
+      "the picker should not be re-created on a state change"
+    );
+    assert.equal(picker.hass, undefined, "still nothing forwarded as hass");
   });
 
   test("a value-changed event drives the scanned range", async () => {
@@ -379,5 +387,159 @@ describe("date range uses HA's picker when it can be loaded", () => {
 
     assert.equal(params.start_ts, startDate.getTime() / 1000);
     assert.equal(params.end_ts, endDate.getTime() / 1000);
+  });
+
+  test("the selection is written back so the picker's own field refreshes", () => {
+    // HA's ha-date-range-picker fires value-changed but does not update its own
+    // startDate/endDate — the consumer has to feed them back or the field keeps
+    // showing the previous range.
+    const picker = el.shadowRoot.querySelector("ha-date-range-picker");
+    const startDate = new Date(2026, 1, 3, 0, 0, 0, 0);
+    const endDate = new Date(2026, 1, 3, 23, 59, 59, 999);
+
+    picker.dispatchEvent(
+      new window.CustomEvent("value-changed", {
+        detail: { value: { startDate, endDate } },
+      })
+    );
+
+    assert.equal(picker.startDate, startDate);
+    assert.equal(picker.endDate, endDate);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Statistic selection
+// ---------------------------------------------------------------------------
+
+const STATS = [
+  { statistic_id: "sensor.grid_import", name: "Grid import" },
+  { statistic_id: "sensor.gas_meter", name: null },
+  { statistic_id: "tibber:home_energy", name: "Tibber home" }, // external, no entity
+];
+
+// Runs before the block that registers a stub ha-entity-picker, so here the
+// element genuinely cannot load — mirrors "date range without HA's picker".
+describe("statistic field without card helpers", () => {
+  test("falls back to a plain text input that still drives a scan", async () => {
+    delete window.loadCardHelpers;
+    const el = mount({ narrow: false, stats: STATS });
+    await settle();
+
+    assert.ok($(el, "stat-input"), "fallback input should render");
+    assert.equal(el.shadowRoot.querySelector("ha-entity-picker"), null);
+
+    let captured;
+    el._send = (m) => {
+      if (m.type.endsWith("fetch_outliers")) {
+        captured = m;
+        return Promise.resolve({ candidates: [], scanned_rows: 0, method: "mad" });
+      }
+      if (m.type.endsWith("list_fixes")) return Promise.resolve({ fixes: [] });
+      return Promise.resolve({});
+    };
+    $(el, "stat-input").value = "tibber:home_energy";
+    await el._scan();
+    await settle();
+
+    assert.equal(captured.statistic_id, "tibber:home_energy");
+  });
+});
+
+describe("statistic selection uses HA's entity picker", () => {
+  let el;
+
+  beforeEach(async () => {
+    // Stand in for HA's lazy-loading path. createCardElement registers
+    // ha-date-range-picker as an import side effect (as the energy card does);
+    // the entities card's getConfigElement pulls in ha-entity-picker.
+    window.loadCardHelpers = async () => ({
+      createCardElement: async () => {
+        if (!window.customElements.get("ha-date-range-picker")) {
+          window.customElements.define(
+            "ha-date-range-picker",
+            class extends window.HTMLElement {}
+          );
+        }
+        return {
+          constructor: {
+            getConfigElement: async () => {
+              if (!window.customElements.get("ha-entity-picker")) {
+                window.customElements.define(
+                  "ha-entity-picker",
+                  class extends window.HTMLElement {}
+                );
+              }
+            },
+          },
+        };
+      },
+    });
+    el = mount({ narrow: false, stats: STATS });
+    await settle();
+  });
+
+  test("the picker replaces the plain text field", () => {
+    assert.ok(
+      el.shadowRoot.querySelector("ha-entity-picker"),
+      "entity picker should be mounted"
+    );
+    assert.equal($(el, "stat-input"), null, "fallback text input should be gone");
+  });
+
+  test("only sum statistics that are real entities are offered", () => {
+    const picker = el.shadowRoot.querySelector("ha-entity-picker");
+    // tibber:home_energy is a long-term statistic with no backing entity, so it
+    // cannot appear in an entity picker.
+    assert.deepEqual(picker.includeEntities, [
+      "sensor.grid_import",
+      "sensor.gas_meter",
+    ]);
+  });
+
+  test("a value-changed selection becomes the scanned statistic", async () => {
+    const picker = el.shadowRoot.querySelector("ha-entity-picker");
+    picker.dispatchEvent(
+      new window.CustomEvent("value-changed", {
+        detail: { value: "sensor.gas_meter" },
+      })
+    );
+
+    // scanParams() forces its own _statId, so read the frame directly here.
+    let captured;
+    el._send = (m) => {
+      if (m.type.endsWith("fetch_outliers")) {
+        captured = m;
+        return Promise.resolve({ candidates: [], scanned_rows: 0, method: "mad" });
+      }
+      if (m.type.endsWith("list_fixes")) return Promise.resolve({ fixes: [] });
+      return Promise.resolve({});
+    };
+    await el._scan();
+    await settle();
+
+    assert.equal(captured.statistic_id, "sensor.gas_meter");
+  });
+
+  test("clearing the picker unsets the statistic", () => {
+    el._statId = "sensor.gas_meter";
+    const picker = el.shadowRoot.querySelector("ha-entity-picker");
+    picker.dispatchEvent(
+      new window.CustomEvent("value-changed", { detail: { value: "" } })
+    );
+    assert.equal(el._statId, null);
+  });
+
+  test("a recent chip fills the picker and selects it", () => {
+    el._recentStats = [{ statistic_id: "sensor.grid_import", name: "Grid import" }];
+    el._renderRecents();
+
+    const chip = el.shadowRoot.querySelector("#stat-recents button[data-value]");
+    assert.ok(chip, "a recent chip should render");
+    chip.click();
+
+    const picker = el.shadowRoot.querySelector("ha-entity-picker");
+    assert.equal(picker.value, "sensor.grid_import");
+    assert.equal(el._statId, "sensor.grid_import");
   });
 });

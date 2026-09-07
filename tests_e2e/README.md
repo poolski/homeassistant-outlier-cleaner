@@ -1,13 +1,15 @@
 # Browser tests
 
-Verifies the one thing no other test in this repo can: that
-`ha-date-range-picker` really loads inside a custom panel.
+Verifies the one thing no other test in this repo can: that HA's own
+`ha-date-range-picker` and `ha-entity-picker` really load inside a custom panel.
 
-The panel reaches it via `window.loadCardHelpers()`, relying on the energy date
-selection card's module registering the element as an import side effect. That
-depends on Home Assistant frontend internals, so it can break through an HA
-release rather than through a change here. jsdom has no HA frontend, so only a
-real instance can answer the question.
+`ha-date-range-picker` in particular is lazy: the panel pulls it in through
+`window.loadCardHelpers()`, which the frontend only defines once a classic
+Lovelace view has loaded. So the fixture logs in, lands on `/lovelace/0`, then
+opens the panel from the sidebar — an in-app navigation, the way a person
+reaches it. That whole path depends on HA frontend internals and can break
+through an HA release rather than through a change here. jsdom has no HA
+frontend, so only a real instance can answer the question.
 
 ## Running
 
@@ -39,19 +41,25 @@ after an HA upgrade.
 
 ## Testing against a specific HA version
 
-The image pins its own Home Assistant. Since HA frontend drift is exactly what
-this suite guards against, override it:
+`HA_VERSION` is the official image tag and defaults to `stable` (the latest
+release). Since HA frontend drift is exactly what this suite guards against, pin
+it to reproduce a report:
 
 ```bash
-HA_VERSION=2026.8.0 npm run e2e
+HA_VERSION=2026.8.3 npm run e2e
 ```
 
-The picker contract the panel depends on — `hass`, `startDate`, `endDate`,
-`ranges`, `extendedPresets`, and a `value-changed` event carrying
-`{value: {startDate, endDate}}` — has held since at least HA 2025.3. If a newer
-release breaks it, these tests fail. There is no fallback control — the panel
-retries the load across HA state updates, and a scan still runs on the default
-30-day range in the meantime.
+The contracts the panel depends on:
+
+- `ha-date-range-picker` — `startDate`, `endDate`, `ranges`, `extendedPresets`,
+  and a `value-changed` event carrying `{value: {startDate, endDate}}`.
+- `ha-entity-picker` — `includeEntities`, `allowCustomEntity`, `value`, and a
+  `value-changed` event carrying `{value: "<entity_id>"}`.
+
+Both have held since at least HA 2025.3. If a newer release breaks either, these
+tests fail. The panel retries the load across HA state updates. In the meantime
+the statistic field is a plain text input the user can type an id into, and a
+scan runs on the default 30-day range until the date picker appears.
 
 ## What is deliberately not covered
 
@@ -62,11 +70,13 @@ keeps it small enough to trust.
 
 ## Container notes
 
-The image (`thomasloven/hass-custom-devcontainer`) is used only for its
-bootstrap: it generates a config, creates an admin user, and skips onboarding.
-Its Lovelace plugin support is irrelevant here, since the integration serves its
-own panel over a static path.
+Runs the official `ghcr.io/home-assistant/home-assistant` image. It has no
+onboarding bypass, so `bootstrap.sh` stands in for one: `ensure_config`, then
+`--script auth add` for the login user, then a `.storage/onboarding` file
+marking the wizard done, then the `statistics_outlier_cleaner:` line in
+`configuration.yaml`. Everything is idempotent, so `npm run up` can be re-run
+against a kept config volume.
 
-`bootstrap.sh` splits the image's one-shot entrypoint into `setup` -> edit
-`configuration.yaml` -> `launch`, because the integration is YAML-configured and
-that file does not exist until setup has run.
+`global-setup.mjs` loads the frontend once before the suite so the first test
+does not eat the cold-start cost — which matters most when the image is running
+under emulation.
