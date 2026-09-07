@@ -487,13 +487,10 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
       this._setupEntityPicker();
       return;
     }
-    // HA replaces the hass object on every state change. Forward it to the date
-    // picker (older HA builds localise from it; current ones read HA context and
-    // ignore it). These updates are also the retry clock for mounting either
-    // field. ha-entity-picker never needs hass.
-    const picker = this.shadowRoot.querySelector(DATE_PICKER_TAG);
-    if (picker) picker.hass = hass;
-    else this._setupDateRangePicker();
+    // Every HA state change is a retry tick for a field whose HA component has
+    // not loaded yet. Both components read locale and config from HA context, so
+    // there is nothing to forward once they are mounted.
+    if (!this._pickerMounted) this._setupDateRangePicker();
     if (!this._entityPickerMounted) this._setupEntityPicker();
   }
 
@@ -625,7 +622,6 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
       if (!wrap || wrap.querySelector(DATE_PICKER_TAG)) return;
 
       const picker = document.createElement(DATE_PICKER_TAG);
-      picker.hass = this._hass;
       picker.startDate = this._startDate;
       picker.endDate = this._endDate;
       // Leaving `ranges` unset is what makes the element build its own presets.

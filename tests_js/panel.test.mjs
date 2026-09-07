@@ -351,20 +351,25 @@ describe("date range uses HA's picker when it can be loaded", () => {
     assert.equal($(el, "date-end"), null, "native To input should be gone");
   });
 
-  test("the picker is given hass and the current range", () => {
+  test("the picker is given the current range and no hass", () => {
     const picker = el.shadowRoot.querySelector("ha-date-range-picker");
 
-    assert.ok(picker.hass, "hass must be forwarded or the picker cannot localise");
+    // The element reads locale and config from HA context, not a hass property.
+    assert.equal(picker.hass, undefined, "nothing should be forwarded as hass");
     assert.ok(picker.startDate instanceof window.Date || picker.startDate instanceof Date);
     assert.ok(picker.endDate instanceof window.Date || picker.endDate instanceof Date);
   });
 
-  test("hass updates are forwarded to the picker", () => {
+  test("a later hass update leaves the mounted picker alone", () => {
     const picker = el.shadowRoot.querySelector("ha-date-range-picker");
-    const next = { states: {}, marker: "second" };
-    el.hass = next;
+    el.hass = { states: {}, marker: "second" };
 
-    assert.equal(picker.hass.marker, "second");
+    assert.equal(
+      el.shadowRoot.querySelector("ha-date-range-picker"),
+      picker,
+      "the picker should not be re-created on a state change"
+    );
+    assert.equal(picker.hass, undefined, "still nothing forwarded as hass");
   });
 
   test("a value-changed event drives the scanned range", async () => {
