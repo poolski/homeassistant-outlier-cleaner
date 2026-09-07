@@ -1,13 +1,14 @@
 # Browser tests
 
-Verifies the one thing no other test in this repo can: that
-`ha-date-range-picker` really loads inside a custom panel.
+Verifies the one thing no other test in this repo can: that HA's own
+`ha-date-range-picker` and `ha-entity-picker` really load inside a custom panel.
 
-The panel reaches it via `window.loadCardHelpers()`, relying on the energy date
-selection card's module registering the element as an import side effect. That
-depends on Home Assistant frontend internals, so it can break through an HA
-release rather than through a change here. jsdom has no HA frontend, so only a
-real instance can answer the question.
+The panel reaches them via `window.loadCardHelpers()` — the energy date
+selection card's module registers the date picker as an import side effect, and
+the entities card's config editor pulls in the entity picker. That depends on
+Home Assistant frontend internals, so it can break through an HA release rather
+than through a change here. jsdom has no HA frontend, so only a real instance
+can answer the question.
 
 ## Running
 
@@ -46,12 +47,17 @@ this suite guards against, override it:
 HA_VERSION=2026.8.0 npm run e2e
 ```
 
-The picker contract the panel depends on — `hass`, `startDate`, `endDate`,
-`ranges`, `extendedPresets`, and a `value-changed` event carrying
-`{value: {startDate, endDate}}` — has held since at least HA 2025.3. If a newer
-release breaks it, these tests fail. There is no fallback control — the panel
-retries the load across HA state updates, and a scan still runs on the default
-30-day range in the meantime.
+The contracts the panel depends on:
+
+- `ha-date-range-picker` — `startDate`, `endDate`, `ranges`, `extendedPresets`,
+  and a `value-changed` event carrying `{value: {startDate, endDate}}`.
+- `ha-entity-picker` — `includeEntities`, `allowCustomEntity`, `value`, and a
+  `value-changed` event carrying `{value: "<entity_id>"}`.
+
+Both have held since at least HA 2025.3. If a newer release breaks either, these
+tests fail. The panel retries the load across HA state updates. In the meantime
+the statistic field is a plain text input the user can type an id into, and a
+scan runs on the default 30-day range until the date picker appears.
 
 ## What is deliberately not covered
 
