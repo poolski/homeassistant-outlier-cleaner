@@ -1,74 +1,28 @@
 /**
- * Does ha-entity-picker actually load inside a custom panel?
+ * Does ha-entity-picker actually work inside a custom panel on a real frontend?
  *
- * The panel reaches it through window.loadCardHelpers(): building the entities
- * card and asking it for its config element imports ha-entity-picker as a side
- * effect. That depends on HA frontend internals, so only a real HA frontend can
- * confirm it still holds. jsdom cannot, which is why this suite exists — keep it
- * to that question.
+ * The panel creates ha-entity-picker directly (registering it first via
+ * loadCardHelpers if the bundle has not already), and the element reads its data
+ * from HA context rather than a hass property. jsdom cannot confirm either still
+ * holds — only a real HA frontend can. Keep this suite to that question.
  */
 
 import { expect, test } from "@playwright/test";
+import { PANEL_TAG, installDeepQuery, openPanel } from "./_helpers.mjs";
 
-const PANEL_PATH = "/statistics-outlier-cleaner";
-const PANEL_TAG = "statistics-outlier-cleaner-panel";
 const PICKER_TAG = "ha-entity-picker";
-
-const USERNAME = process.env.HASS_USERNAME || "dev";
-const PASSWORD = process.env.HASS_PASSWORD || "dev";
-
-/** Log in through HA's own form and land on the panel. */
-async function login(page) {
-  await page.goto(PANEL_PATH);
-
-  const username = page.locator('input[name="username"]');
-  const panelEl = page.locator(PANEL_TAG);
-
-  await expect(username.or(panelEl).first()).toBeAttached({ timeout: 60_000 });
-
-  if (!(await username.count())) return;
-
-  await username.fill(USERNAME);
-  await page.locator('input[name="password"]').fill(PASSWORD);
-  await page.keyboard.press("Enter");
-  await page.waitForURL(`**${PANEL_PATH}**`, { timeout: 60_000 });
-}
-
-async function panel(page) {
-  const handle = page.locator(PANEL_TAG);
-  await handle.waitFor({ state: "attached", timeout: 60_000 });
-  return handle;
-}
-
-/**
- * Give page.evaluate a way to reach the panel, several shadow roots down inside
- * HA's shell. Playwright locators pierce shadow DOM; raw DOM calls do not.
- */
-async function installDeepQuery(page) {
-  await page.addInitScript(() => {
-    window.__deepQuery = (tag, root = document) => {
-      const direct = root.querySelector(tag);
-      if (direct) return direct;
-      for (const el of root.querySelectorAll("*")) {
-        if (el.shadowRoot) {
-          const found = window.__deepQuery(tag, el.shadowRoot);
-          if (found) return found;
-        }
-      }
-      return null;
-    };
-  });
-}
 
 test.beforeEach(async ({ page }) => {
   await installDeepQuery(page);
-  await login(page);
-  await panel(page);
+  await openPanel(page);
 });
 
-test("the panel registers ha-entity-picker via loadCardHelpers", async ({
+test("ha-entity-picker is registered by the time the panel needs it", async ({
   page,
 }) => {
+  // Current HA ships it in the base bundle; on an older one the panel's
+  // _ensureEntityPicker() registers it via loadCardHelpers. Either way it must
+  // be defined.
   await expect
     .poll(
       () => page.evaluate((tag) => Boolean(customElements.get(tag)), PICKER_TAG),

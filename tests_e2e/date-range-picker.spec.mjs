@@ -9,69 +9,13 @@
  */
 
 import { expect, test } from "@playwright/test";
+import { PANEL_TAG, installDeepQuery, openPanel } from "./_helpers.mjs";
 
-const PANEL_PATH = "/statistics-outlier-cleaner";
-const PANEL_TAG = "statistics-outlier-cleaner-panel";
 const PICKER_TAG = "ha-date-range-picker";
-
-const USERNAME = process.env.HASS_USERNAME || "dev";
-const PASSWORD = process.env.HASS_PASSWORD || "dev";
-
-/** Log in through HA's own form and land on the panel. */
-async function login(page) {
-  await page.goto(PANEL_PATH);
-
-  const username = page.locator('input[name="username"]');
-  const panelEl = page.locator(PANEL_TAG);
-
-  // Requesting the panel redirects to /auth/authorize, and that redirect plus
-  // the frontend bundle take a while. Wait for whichever arrives: the login
-  // form, or the panel itself if this context is already authenticated.
-  await expect(username.or(panelEl).first()).toBeAttached({ timeout: 60_000 });
-
-  if (!(await username.count())) return;
-
-  await username.fill(USERNAME);
-  await page.locator('input[name="password"]').fill(PASSWORD);
-  await page.keyboard.press("Enter");
-  await page.waitForURL(`**${PANEL_PATH}**`, { timeout: 60_000 });
-}
-
-/** The panel element, once HA has instantiated the custom panel. */
-async function panel(page) {
-  const handle = page.locator(PANEL_TAG);
-  await handle.waitFor({ state: "attached", timeout: 60_000 });
-  return handle;
-}
-
-/**
- * Give page.evaluate a way to reach the panel.
- *
- * The panel sits several shadow roots down inside HA's shell
- * (home-assistant > home-assistant-main > partial-panel-resolver >
- * ha-panel-custom), so a plain document.querySelector never finds it. Playwright
- * locators pierce shadow DOM; raw DOM calls inside evaluate do not.
- */
-async function installDeepQuery(page) {
-  await page.addInitScript(() => {
-    window.__deepQuery = (tag, root = document) => {
-      const direct = root.querySelector(tag);
-      if (direct) return direct;
-      for (const el of root.querySelectorAll("*")) {
-        if (el.shadowRoot) {
-          const found = window.__deepQuery(tag, el.shadowRoot);
-          if (found) return found;
-        }
-      }
-      return null;
-    };
-  });
-}
 
 test.beforeEach(async ({ page }) => {
   await installDeepQuery(page);
-  await login(page);
-  await panel(page);
+  await openPanel(page);
 });
 
 test("the panel registers ha-date-range-picker via loadCardHelpers", async ({

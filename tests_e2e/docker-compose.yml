@@ -1,31 +1,32 @@
 # Home Assistant with this integration mounted in, for browser tests.
 #
-# thomasloven/hass-custom-devcontainer is used purely for its bootstrap: it
-# generates a config, creates an admin user and skips onboarding, which is what
-# makes an unattended browser test possible. Its Lovelace plugin machinery
-# (LOVELACE_PLUGINS etc.) is irrelevant here — this integration serves its own
-# panel over a static path.
+# The official image is used directly. bootstrap.sh stands in for the onboarding
+# wizard — it creates the login user and marks onboarding done — so the tests can
+# reach the login form unattended. The integration serves its own panel over a
+# static path, so no Lovelace/HACS machinery is needed.
 
 services:
   homeassistant:
-    image: thomasloven/hass-custom-devcontainer:latest
+    # HA_VERSION picks the release under test. Default to the latest stable;
+    # frontend internals are what this suite guards, so pin it to reproduce a
+    # report (e.g. HA_VERSION=2026.8.3).
+    image: ghcr.io/home-assistant/home-assistant:${HA_VERSION:-stable}
+    entrypoint: ["bash", "/bootstrap.sh"]
     ports:
       - "${HA_PORT:-8123}:8123"
     volumes:
-      # The integration under test. Read-write because Python wants to write
-      # __pycache__ next to the sources.
+      # The integration under test. Read-write because Python writes __pycache__
+      # next to the sources.
       - ../custom_components/statistics_outlier_cleaner:/config/custom_components/statistics_outlier_cleaner
       - ./bootstrap.sh:/bootstrap.sh:ro
     environment:
       HASS_USERNAME: "${HASS_USERNAME:-dev}"
       HASS_PASSWORD: "${HASS_PASSWORD:-dev}"
-      # Set to test against a specific HA release rather than whatever the
-      # image pins. The frontend internals this suite guards are what drift.
-      HA_VERSION: "${HA_VERSION:-}"
-    command: ["bash", "/bootstrap.sh"]
     healthcheck:
-      test: ["CMD", "curl", "-fs", "http://localhost:8123/manifest.json"]
+      test: ["CMD-SHELL", "curl -fs http://localhost:8123/manifest.json || exit 1"]
       interval: 5s
       timeout: 5s
-      retries: 60
-      start_period: 30s
+      # Generous: a cold official image has to set up default_config before the
+      # panel's static path is registered.
+      retries: 90
+      start_period: 60s
