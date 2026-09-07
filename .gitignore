@@ -8,3 +8,4 @@ node_modules/
 tests_e2e/test-results/
 tests_e2e/playwright-report/
 tests_e2e/*.png
+test-results/*
