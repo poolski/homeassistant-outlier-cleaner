@@ -1,9 +1,14 @@
-# Home Assistant Statistics Outlier Cleanup
+# Recorder Toolkit
 
 [![HACS Badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 [![GitHub Release](https://img.shields.io/github/release/poolski/homeassistant-outlier-cleaner.svg)](https://github.com/poolski/homeassistant-outlier-cleaner/releases)
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=poolski&repository=homeassistant-outlier-cleaner&category=integration)
+
+> [!NOTE]
+> This integration was renamed from **Statistics Outlier Cleaner**. If you
+> have `statistics_outlier_cleaner:` in your `configuration.yaml`, change it
+> to `recorder_toolkit:` and restart Home Assistant.
 
 A Home Assistant custom integration for detecting and fixing outlier spikes in long-term statistics — the kind caused by HA restarts, meter replacements, or recorder compaction bugs.
 
@@ -25,27 +30,27 @@ Unlike the built-in Developer Tools > Statistics dialog, this integration:
 ### Via HACS (recommended)
 
 1. Open HACS → **Integrations** → three-dot menu → **Custom repositories**, add this repo URL with category **Integration**.
-2. Search for **Statistics Outlier Cleaner** and click **Download**.
+2. Search for **Recorder Toolkit** and click **Download**.
 3. Add one line to your `configuration.yaml`:
 
    ```yaml
-   statistics_outlier_cleaner:
+   recorder_toolkit:
    ```
 
 4. Restart Home Assistant. The **Outlier Cleaner** entry will appear in the sidebar.
 
 ### Manual
 
-1. Copy the `custom_components/statistics_outlier_cleaner` directory into your HA config folder:
+1. Copy the `custom_components/recorder_toolkit` directory into your HA config folder:
 
    ```text
-   <config>/custom_components/statistics_outlier_cleaner/
+   <config>/custom_components/recorder_toolkit/
    ```
 
 2. Add one line to `configuration.yaml`:
 
    ```yaml
-   statistics_outlier_cleaner:
+   recorder_toolkit:
    ```
 
 3. Restart Home Assistant.
@@ -71,10 +76,10 @@ After installation a new **Outlier Cleaner** entry appears in the sidebar (admin
 
 ### Service action
 
-For scheduled or automation use, call `statistics_outlier_cleaner.clean_outliers`:
+For scheduled or automation use, call `recorder_toolkit.clean_outliers`:
 
 ```yaml
-action: statistics_outlier_cleaner.clean_outliers
+action: recorder_toolkit.clean_outliers
 data:
   statistic_id: sensor.electricity_meter_energy
   method: mad          # mad | absolute | top_n
@@ -88,12 +93,25 @@ data:
 To restore a previous fix:
 
 ```yaml
-action: statistics_outlier_cleaner.restore_fix
+action: recorder_toolkit.restore_fix
 data:
   fix_id: "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
 ```
 
 The fix ID is logged at INFO level after every `clean_outliers` call.
+
+---
+
+## Duplicate Finder
+
+The **Duplicate Finder** tab scans your numeric sensors' recorded history to
+find entities recording the same underlying measurement more than once
+(e.g. a smart plug and a whole-home energy monitor both tracking the same
+circuit). For each group of likely duplicates it suggests keeping whichever
+entity has the most complete history, and generates a copyable
+`recorder: exclude:` YAML block (using safe globs where possible) for the
+rest — you review and paste it into `configuration.yaml` yourself; nothing
+is written automatically.
 
 ---
 
@@ -128,7 +146,7 @@ Rather than comparing against one global median, each row is judged against **ro
 **Example — electricity meter, automation use:**
 
 ```yaml
-action: statistics_outlier_cleaner.clean_outliers
+action: recorder_toolkit.clean_outliers
 data:
   statistic_id: sensor.electricity_meter_energy
   method: mad
@@ -153,7 +171,7 @@ A typical electricity meter accumulates ~0.5–2 kWh/h. A restart spike of 500 k
 **Example — solar inverter, safe automation:**
 
 ```yaml
-action: statistics_outlier_cleaner.clean_outliers
+action: recorder_toolkit.clean_outliers
 data:
   statistic_id: sensor.solar_inverter_energy
   method: absolute

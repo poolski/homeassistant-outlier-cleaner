@@ -1,5 +1,5 @@
 """
-Integration tests — verifies that statistics_outlier_cleaner registers
+Integration tests — verifies that recorder_toolkit registers
 correctly against a real (test) Home Assistant instance.
 
 The `hass` fixture is provided by pytest-homeassistant-custom-component and
@@ -16,7 +16,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant
 from homeassistant.setup import async_setup_component
 
-DOMAIN = "statistics_outlier_cleaner"
+DOMAIN = "recorder_toolkit"
 
 WS_COMMANDS = [
     f"{DOMAIN}/list_sum_statistics",

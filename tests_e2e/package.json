@@ -1,5 +1,5 @@
 {
-  "name": "statistics-outlier-cleaner-e2e",
+  "name": "recorder-toolkit-e2e",
   "private": true,
   "type": "module",
   "description": "Browser tests against a real Home Assistant. Run on demand, not in CI.",

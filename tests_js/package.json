@@ -1,5 +1,5 @@
 {
-  "name": "statistics-outlier-cleaner-frontend-tests",
+  "name": "recorder-toolkit-frontend-tests",
   "private": true,
   "type": "module",
   "description": "Frontend panel tests. Uses node's built-in test runner; jsdom is the only dependency.",

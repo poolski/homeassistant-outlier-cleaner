@@ -1,16 +1,16 @@
-"""Constants for the Statistics Outlier Cleaner integration."""
+"""Constants for the Recorder Toolkit integration."""
 
 from __future__ import annotations
 
 from typing import Final
 
-DOMAIN: Final = "statistics_outlier_cleaner"
+DOMAIN: Final = "recorder_toolkit"
 
-PANEL_URL_PATH: Final = "statistics-outlier-cleaner"
-PANEL_TITLE: Final = "Outlier Cleaner"
+PANEL_URL_PATH: Final = "recorder-toolkit"
+PANEL_TITLE: Final = "Recorder Toolkit"
 PANEL_ICON: Final = "mdi:chart-bell-curve-cumulative"
-PANEL_WEBCOMPONENT: Final = "statistics-outlier-cleaner-panel"
-PANEL_STATIC_PATH: Final = "/statistics_outlier_cleaner_static"
+PANEL_WEBCOMPONENT: Final = "recorder-toolkit-panel"
+PANEL_STATIC_PATH: Final = "/recorder_toolkit_static"
 
 # Service / action names
 SERVICE_CLEAN_OUTLIERS: Final = "clean_outliers"
@@ -35,6 +35,14 @@ WS_FETCH_OUTLIERS: Final = f"{DOMAIN}/fetch_outliers"
 WS_APPLY_FIX: Final = f"{DOMAIN}/apply_fix"
 WS_LIST_FIXES: Final = f"{DOMAIN}/list_fixes"
 WS_RESTORE_FIX: Final = f"{DOMAIN}/restore_fix"
+WS_LIST_DUPLICATE_CANDIDATES: Final = f"{DOMAIN}/list_duplicate_candidates"
+WS_GENERATE_EXCLUDE_YAML: Final = f"{DOMAIN}/generate_exclude_yaml"
+
+ATTR_GROUP_SELECTIONS: Final = "group_selections"
+
+ATTR_NAME_THRESHOLD: Final = "name_threshold"
+ATTR_CORRELATION_THRESHOLD: Final = "correlation_threshold"
+ATTR_MIN_OVERLAP: Final = "min_overlap"
 
 # Defaults
 DEFAULT_TOP_N: Final = 10
@@ -44,3 +52,8 @@ DEFAULT_AUTO_FIX_LOOKBACK_DAYS: Final = 7
 DEFAULT_REPLACEMENT: Final = 0.0
 DEFAULT_PERIOD: Final = "hybrid"
 DEFAULT_METHOD: Final = "top_n"
+
+DEFAULT_NAME_SIMILARITY_THRESHOLD: Final = 0.6
+DEFAULT_CORRELATION_THRESHOLD: Final = 0.98
+DEFAULT_MIN_OVERLAP_POINTS: Final = 20
+DEFAULT_DUPLICATE_LOOKBACK_DAYS: Final = 30

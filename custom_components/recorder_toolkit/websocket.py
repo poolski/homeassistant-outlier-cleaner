@@ -1,4 +1,4 @@
-"""WebSocket API handlers for Statistics Outlier Cleaner."""
+"""WebSocket API handlers for Recorder Toolkit."""
 
 from __future__ import annotations
 
@@ -38,6 +38,7 @@ from .db import (
 )
 from .outlier import get_sum_statistic_ids, scan_outliers
 from .paths import DatabaseNotSupportedError, resolve_sqlite_path
+from .websocket_duplicates import async_register_duplicate_commands
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ def async_register_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_apply_fix)
     websocket_api.async_register_command(hass, ws_list_fixes)
     websocket_api.async_register_command(hass, ws_restore_fix)
+    async_register_duplicate_commands(hass)
 
 
 # ---------------------------------------------------------------------------

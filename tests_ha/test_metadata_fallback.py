@@ -21,14 +21,14 @@ from pytest_homeassistant_custom_component.components.recorder.common import (
     async_wait_recording_done,
 )
 
-from custom_components.statistics_outlier_cleaner import (
+from custom_components.recorder_toolkit import (
     _resolve_metadata_id as init_resolve_metadata_id,
 )
-from custom_components.statistics_outlier_cleaner.websocket import (
+from custom_components.recorder_toolkit.websocket import (
     _resolve_metadata_id as ws_resolve_metadata_id,
 )
 
-DOMAIN = "statistics_outlier_cleaner"
+DOMAIN = "recorder_toolkit"
 STATISTIC_ID = "outlier_test:fallback_probe"
 
 

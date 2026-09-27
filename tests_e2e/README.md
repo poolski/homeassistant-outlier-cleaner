@@ -73,7 +73,7 @@ keeps it small enough to trust.
 Runs the official `ghcr.io/home-assistant/home-assistant` image. It has no
 onboarding bypass, so `bootstrap.sh` stands in for one: `ensure_config`, then
 `--script auth add` for the login user, then a `.storage/onboarding` file
-marking the wizard done, then the `statistics_outlier_cleaner:` line in
+marking the wizard done, then the `recorder_toolkit:` line in
 `configuration.yaml`. Everything is idempotent, so `npm run up` can be re-run
 against a kept config volume.
 

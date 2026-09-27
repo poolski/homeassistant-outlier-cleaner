@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 from homeassistant.core import HomeAssistant
 
-from custom_components.statistics_outlier_cleaner.paths import (
+from custom_components.recorder_toolkit.paths import (
     DatabaseNotSupportedError,
     resolve_sqlite_path,
     sqlite_path_from_url,

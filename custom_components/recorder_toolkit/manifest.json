@@ -1,6 +1,6 @@
 {
-  "domain": "statistics_outlier_cleaner",
-  "name": "Statistics Outlier Cleaner",
+  "domain": "recorder_toolkit",
+  "name": "Recorder Toolkit",
   "codeowners": [
     "@poolski"
   ],

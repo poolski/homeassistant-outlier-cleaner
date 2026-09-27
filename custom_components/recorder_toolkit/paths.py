@@ -48,7 +48,7 @@ def sqlite_path_from_url(db_url: str) -> str:
         # Render the dialect only. `url` itself may carry a password, and this
         # message reaches the frontend and the log.
         raise DatabaseNotSupportedError(
-            f"The recorder is using {backend}, but Statistics Outlier Cleaner "
+            f"The recorder is using {backend}, but Recorder Toolkit "
             "can only modify a SQLite database. See the integration README."
         )
 

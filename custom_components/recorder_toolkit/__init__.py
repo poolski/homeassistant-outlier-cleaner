@@ -1,4 +1,4 @@
-"""Statistics Outlier Cleaner integration."""
+"""Recorder Toolkit integration."""
 
 from __future__ import annotations
 
@@ -49,12 +49,12 @@ from .websocket import async_register_commands
 
 _LOGGER = logging.getLogger(__name__)
 
-# Accept `statistics_outlier_cleaner:` in configuration.yaml with no options.
+# Accept `recorder_toolkit:` in configuration.yaml with no options.
 CONFIG_SCHEMA = vol.Schema({DOMAIN: vol.Schema({})}, extra=vol.ALLOW_EXTRA)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Set up Statistics Outlier Cleaner."""
+    """Set up Recorder Toolkit."""
     _check_sqlite_dialect(hass)
     async_register_commands(hass)
     await _register_panel(hass)
@@ -226,18 +226,18 @@ def _check_sqlite_dialect(hass: HomeAssistant) -> None:
     try:
         db_path = resolve_sqlite_path(hass)
     except DatabaseNotSupportedError as exc:
-        _LOGGER.warning("Statistics Outlier Cleaner: %s", exc)
+        _LOGGER.warning("Recorder Toolkit: %s", exc)
         return
     except Exception:  # noqa: BLE001 - recorder not up yet; not our problem here
         _LOGGER.debug(
-            "Statistics Outlier Cleaner: recorder not available at setup, "
+            "Recorder Toolkit: recorder not available at setup, "
             "deferring database checks"
         )
         return
 
     if not os.path.isfile(db_path):
         _LOGGER.warning(
-            "Statistics Outlier Cleaner: SQLite database not found at %s. "
+            "Recorder Toolkit: SQLite database not found at %s. "
             "Direct database fixes require a SQLite recorder.",
             db_path,
         )

@@ -1,5 +1,5 @@
 """
-Smoke tests for the Statistics Outlier Cleaner component.
+Smoke tests for the Recorder Toolkit component.
 
 Validates that all required files are present, manifests and service
 schemas are well-formed, and the JavaScript panel contains the expected
@@ -25,7 +25,7 @@ import yaml
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BASE = os.path.join(os.path.dirname(__file__), "custom_components", "statistics_outlier_cleaner")
+BASE = os.path.join(os.path.dirname(__file__), "custom_components", "recorder_toolkit")
 
 
 # ---------------------------------------------------------------------------
@@ -41,7 +41,8 @@ REQUIRED_FILES = [
     "outlier.py",
     "services.yaml",
     "websocket.py",
-    "frontend/statistics-outlier-cleaner-panel.js",
+    "frontend/recorder-toolkit-panel.js",
+    "frontend/outlier-cleaner-view.js",
 ]
 
 
@@ -67,7 +68,7 @@ def test_manifest_required_keys(manifest):
 
 
 def test_manifest_domain(manifest):
-    assert manifest["domain"] == "statistics_outlier_cleaner"
+    assert manifest["domain"] == "recorder_toolkit"
 
 
 def test_manifest_no_config_flow(manifest):
@@ -125,39 +126,45 @@ def test_restore_fix_has_fix_id_field(services):
 
 @pytest.fixture(scope="module")
 def panel_js() -> str:
-    with open(os.path.join(BASE, "frontend", "statistics-outlier-cleaner-panel.js")) as fh:
+    with open(os.path.join(BASE, "frontend", "recorder-toolkit-panel.js")) as fh:
+        return fh.read()
+
+
+@pytest.fixture(scope="module")
+def outlier_view_js() -> str:
+    with open(os.path.join(BASE, "frontend", "outlier-cleaner-view.js")) as fh:
         return fh.read()
 
 
 def test_panel_defines_custom_element(panel_js):
     assert "customElements.define" in panel_js
-    assert "statistics-outlier-cleaner-panel" in panel_js
+    assert "recorder-toolkit-panel" in panel_js
 
 
-def test_panel_class_name(panel_js):
-    assert "StatisticsOutlierCleanerPanel" in panel_js
+def test_panel_class_name(outlier_view_js):
+    assert "OutlierCleanerView" in outlier_view_js
 
 
-def test_panel_uses_ha_entity_picker(panel_js):
+def test_panel_uses_ha_entity_picker(outlier_view_js):
     # HA's own entity picker, with a plain text fallback. list_sum_statistics
     # still feeds the picker's allow-list.
-    assert "list_sum_statistics" in panel_js
-    assert "ha-entity-picker" in panel_js
-    assert "stat-input" in panel_js
-    assert "stat-dropdown" not in panel_js
+    assert "list_sum_statistics" in outlier_view_js
+    assert "ha-entity-picker" in outlier_view_js
+    assert "stat-input" in outlier_view_js
+    assert "stat-dropdown" not in outlier_view_js
 
 
-def test_panel_uses_ha_date_range_picker(panel_js):
+def test_panel_uses_ha_date_range_picker(outlier_view_js):
     # HA's own picker is the only date control; there is no fallback field of
     # ours to drift from it.
-    assert "ha-date-range-picker" in panel_js
-    assert 'type="date"' not in panel_js
-    assert "date-range-wrap" in panel_js
+    assert "ha-date-range-picker" in outlier_view_js
+    assert 'type="date"' not in outlier_view_js
+    assert "date-range-wrap" in outlier_view_js
 
 
-def test_panel_references_ws_commands(panel_js):
+def test_panel_references_ws_commands(outlier_view_js):
     for cmd in ("fetch_outliers", "apply_fix", "list_fixes", "restore_fix"):
-        assert cmd in panel_js, f"panel JS missing WS command reference '{cmd}'"
+        assert cmd in outlier_view_js, f"panel JS missing WS command reference '{cmd}'"
 
 
 
@@ -168,7 +175,7 @@ def test_panel_references_ws_commands(panel_js):
 
 def test_db_module_exports():
     sys.path.insert(0, os.path.dirname(__file__))
-    from custom_components.statistics_outlier_cleaner.db import (
+    from custom_components.recorder_toolkit.db import (
         apply_fix_sync,
         ensure_backup_table,
         fetch_stats_rows,
@@ -182,7 +189,7 @@ def test_db_module_exports():
 
 
 def test_outlier_module_exports():
-    from custom_components.statistics_outlier_cleaner.outlier import (
+    from custom_components.recorder_toolkit.outlier import (
         OutlierCandidate,
         OutlierReport,
         _algo_absolute,

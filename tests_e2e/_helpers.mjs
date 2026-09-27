@@ -5,8 +5,11 @@ import { expect } from "@playwright/test";
 const USERNAME = process.env.HASS_USERNAME || "dev";
 const PASSWORD = process.env.HASS_PASSWORD || "dev";
 
-export const PANEL_PATH = "/statistics-outlier-cleaner";
-export const PANEL_TAG = "statistics-outlier-cleaner-panel";
+export const PANEL_PATH = "/recorder-toolkit";
+// The Outlier Cleaner view, nested one shadow root inside the
+// <recorder-toolkit-panel> shell — specs reach into it directly (._scan(),
+// its shadowRoot) rather than the shell, which has neither.
+export const PANEL_TAG = "outlier-cleaner-view";
 
 /**
  * Give page.evaluate a way to reach the panel, several shadow roots down inside
