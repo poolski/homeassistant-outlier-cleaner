@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/poolski/homeassistant-outlier-cleaner/compare/v1.0.0...v1.0.1) (2026-09-27)
+
+
+### Bug Fixes
+
+* **duplicates:** split duplicate scan into cheap fuzzy match + on-demand correlation ([#20](https://github.com/poolski/homeassistant-outlier-cleaner/issues/20)) ([644eb45](https://github.com/poolski/homeassistant-outlier-cleaner/commit/644eb4553eee45287a18694ce49bae42e27f2791))
+
 ## [1.0.0](https://github.com/poolski/homeassistant-outlier-cleaner/compare/v0.4.2...v1.0.0) (2026-09-27)
 
 
