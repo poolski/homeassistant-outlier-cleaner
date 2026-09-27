@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/poolski/homeassistant-outlier-cleaner/compare/v0.3.0...v0.3.1) (2026-09-27)
+
+
+### Bug Fixes
+
+* **outlier:** sort detected outliers by date descending ([#10](https://github.com/poolski/homeassistant-outlier-cleaner/issues/10)) ([2ea5739](https://github.com/poolski/homeassistant-outlier-cleaner/commit/2ea5739bdbdb16dd553453f3e11281e1d7dcccf5))
+
 ## [0.3.0](https://github.com/poolski/homeassistant-outlier-cleaner/compare/v0.2.0...v0.3.0) (2026-09-07)
 
 
