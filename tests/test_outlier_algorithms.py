@@ -21,6 +21,7 @@ from custom_components.statistics_outlier_cleaner.outlier import (
     _hybrid_rows,
     _median_sorted,
     _normalise_rows,
+    _suggest_replacement,
     _to_ms_epoch,
 )
 
@@ -570,3 +571,72 @@ class TestHybridRows:
 
     def test_empty_both_returns_empty(self):
         assert _hybrid_rows([], []) == []
+
+
+# ---------------------------------------------------------------------------
+# _suggest_replacement
+# ---------------------------------------------------------------------------
+
+
+class TestSuggestReplacement:
+    def test_returns_median_of_same_time_of_day(self):
+        candidate = _hour(7 * _DAY_MS + 10 * _HOUR_MS, 999.0)
+        pool = [
+            _hour(d * _DAY_MS + 10 * _HOUR_MS, v)
+            for d, v in enumerate([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0])
+        ]
+        assert _suggest_replacement(candidate, pool, lookback_days=7) == 4.0
+
+    def test_ignores_other_times_of_day(self):
+        candidate = _hour(7 * _DAY_MS + 10 * _HOUR_MS, 999.0)
+        pool = [
+            _hour(6 * _DAY_MS + 10 * _HOUR_MS, 5.0),
+            _hour(6 * _DAY_MS + 14 * _HOUR_MS, 999.0),  # different hour, ignored
+        ]
+        assert _suggest_replacement(candidate, pool, lookback_days=7) == 5.0
+
+    def test_excludes_the_candidate_itself(self):
+        candidate = _hour(7 * _DAY_MS + 10 * _HOUR_MS, 999.0)
+        pool = [candidate, _hour(6 * _DAY_MS + 10 * _HOUR_MS, 3.0)]
+        assert _suggest_replacement(candidate, pool, lookback_days=7) == 3.0
+
+    def test_ignores_data_outside_the_lookback_window(self):
+        candidate = _hour(10 * _DAY_MS + 10 * _HOUR_MS, 999.0)
+        pool = [
+            _hour(9 * _DAY_MS + 10 * _HOUR_MS, 5.0),  # within 1-day lookback
+            _hour(2 * _DAY_MS + 10 * _HOUR_MS, 500.0),  # outside 1-day lookback
+        ]
+        assert _suggest_replacement(candidate, pool, lookback_days=1) == 5.0
+
+    def test_ignores_future_rows(self):
+        candidate = _hour(5 * _DAY_MS + 10 * _HOUR_MS, 999.0)
+        pool = [_hour(6 * _DAY_MS + 10 * _HOUR_MS, 5.0)]  # after the candidate
+        assert _suggest_replacement(candidate, pool, lookback_days=7) is None
+
+    def test_returns_none_when_no_history(self):
+        candidate = _hour(0, 999.0)
+        assert _suggest_replacement(candidate, [], lookback_days=7) is None
+
+    def test_returns_none_when_lookback_days_is_zero(self):
+        candidate = _hour(7 * _DAY_MS, 999.0)
+        pool = [_hour(6 * _DAY_MS, 5.0)]
+        assert _suggest_replacement(candidate, pool, lookback_days=0) is None
+
+    def test_respects_period_tolerance_for_five_minute_rows(self):
+        candidate = _five_min(7 * _DAY_MS + 10 * _HOUR_MS, 999.0)
+        pool = [
+            _five_min(6 * _DAY_MS + 10 * _HOUR_MS + 20_000, 5.0),  # within ±30s
+            _five_min(6 * _DAY_MS + 10 * _HOUR_MS + 60_000, 500.0),  # outside ±30s
+        ]
+        assert _suggest_replacement(candidate, pool, lookback_days=7) == 5.0
+
+    def test_only_matches_same_period_type(self):
+        candidate = _hour(7 * _DAY_MS + 10 * _HOUR_MS, 999.0)
+        pool = [_five_min(6 * _DAY_MS + 10 * _HOUR_MS, 5.0)]
+        assert _suggest_replacement(candidate, pool, lookback_days=7) is None
+
+    def test_handles_midnight_wrap_around(self):
+        # Candidate just after midnight; peer just before midnight the prior day.
+        candidate = _five_min(7 * _DAY_MS + 10_000, 999.0)  # day 7, 00:00:10
+        pool = [_five_min(7 * _DAY_MS - 10_000, 5.0)]  # day 6, 23:59:50
+        assert _suggest_replacement(candidate, pool, lookback_days=7) == 5.0

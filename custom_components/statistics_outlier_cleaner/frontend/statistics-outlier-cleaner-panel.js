@@ -270,6 +270,16 @@ const STYLES = `
   tr:hover td { background: rgba(var(--rgb-primary-color, 3,169,244), 0.05); }
   tr.selected td { background: rgba(var(--rgb-primary-color, 3,169,244), 0.1); }
   td.change-cell { font-family: monospace; }
+  button.auto-btn {
+    background: transparent;
+    color: var(--primary-color, #03a9f4);
+    border: 1px solid var(--primary-color, #03a9f4);
+    padding: 0 8px;
+    height: 26px;
+    font-size: 0.75rem;
+    font-family: monospace;
+  }
+  button.auto-btn:disabled { opacity: 0.3; border-color: var(--divider-color, #e0e0e0); color: var(--secondary-text-color); }
   .status { padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 0.9rem; border-left: 3px solid; }
   .status.info    { background: rgba(var(--rgb-primary-color, 3,169,244), 0.1); color: var(--primary-text-color); border-left-color: var(--primary-color, #03a9f4); }
   .status.success { background: rgba(var(--rgb-success-color, 76,175,80), 0.1); color: var(--primary-text-color); border-left-color: var(--success-color, #4caf50); }
@@ -791,6 +801,10 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
             <label>Top N</label>
             <input type="number" id="top-n" value="10" min="1">
           </div>
+          <div class="form-group">
+            <label>Auto-fix lookback (days)</label>
+            <input type="number" id="auto-lookback-days" value="7" min="0" step="1">
+          </div>
         </div>
 
         <div id="method-help"></div>
@@ -1016,6 +1030,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     if (method === "mad")      params.mad_factor = parseFloat(this._q("mad-factor").value) || 6;
     if (method === "absolute") params.threshold  = parseFloat(this._q("threshold").value) || 0;
     if (method === "top_n")    params.top_n      = parseInt(this._q("top-n").value) || 10;
+    params.suggest_lookback_days = parseInt(this._q("auto-lookback-days").value) || 0;
 
     this._showStatus("info", "Scanning…");
     this._q("btn-scan").disabled = true;
@@ -1100,12 +1115,16 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     const tbody = this._candidates.map((c, i) => {
       const dt = new Date(c.start).toLocaleString();
       const checked = this._selected.has(i) ? "checked" : "";
+      const autoCell = c.suggested != null
+        ? `<button class="auto-btn" data-idx="${i}">Auto: ${c.suggested.toFixed(2)}</button>`
+        : `<button class="auto-btn" data-idx="${i}" disabled title="No history to suggest a value">Auto: —</button>`;
       return `<tr class="${this._selected.has(i) ? "selected" : ""}" data-idx="${i}">
         <td><input type="checkbox" class="row-check" data-idx="${i}" ${checked}></td>
         <td>${dt}</td>
         <td>${c.period}</td>
         <td class="change-cell">${c.change.toFixed(4)}</td>
         <td>${c.state != null ? c.state.toFixed(4) : "—"}</td>
+        <td>${autoCell}</td>
       </tr>`;
     }).join("");
 
@@ -1116,7 +1135,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
             <th style="width:32px"><input type="checkbox" id="check-all" ${
               this._allSelected() ? "checked" : ""
             }></th>
-            <th>Start</th><th>Period</th><th>Change</th><th>State</th>
+            <th>Start</th><th>Period</th><th>Change</th><th>State</th><th>Auto</th>
           </tr>
         </thead>
         <tbody>${tbody}</tbody>
@@ -1131,6 +1150,12 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
           ?.classList.toggle("selected", e.target.checked);
         this._updateSelectionCount();
         this._updateCheckAll();
+      });
+    });
+    this._q("results-table").querySelectorAll(".auto-btn").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        const idx = parseInt(e.target.dataset.idx);
+        this._applyAutoFix(idx);
       });
     });
 
@@ -1168,17 +1193,46 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
   async _applyFix() {
     if (!this._selected.size) return;
 
-    const statId = this._statId || this._q("stat-input")?.value.trim() || "";
     const replacement = parseFloat(this._q("replacement").value) || 0;
     const dryRun = this._q("dry-run").checked;
-
-    const candidates = [...this._selected].map((i) => ({
-      start_ts: this._candidates[i].start / 1000,
-      period: this._candidates[i].period,
-    }));
+    const indices = [...this._selected];
 
     this._showStatus("info", dryRun ? "Running dry-run…" : "Applying fix…");
     this._q("btn-apply").disabled = true;
+    try {
+      await this._applyCandidates(indices, replacement, dryRun);
+    } finally {
+      if (this._selected.size) this._q("btn-apply").disabled = false;
+    }
+  }
+
+  /** Apply a single row's suggested value — the "Auto: X.XX" button. */
+  async _applyAutoFix(idx) {
+    const candidate = this._candidates[idx];
+    if (!candidate || candidate.suggested == null) return;
+
+    const dryRun = this._q("dry-run").checked;
+    const btn = this._q("results-table")?.querySelector(`.auto-btn[data-idx="${idx}"]`);
+    if (btn) btn.disabled = true;
+
+    this._showStatus("info", dryRun ? "Running dry-run…" : "Applying auto-fix…");
+    try {
+      await this._applyCandidates([idx], candidate.suggested, dryRun);
+    } finally {
+      // A committed fix re-renders the table (button is gone); on failure or
+      // dry-run the row survives, so re-enable its button.
+      this._q("results-table")?.querySelector(`.auto-btn[data-idx="${idx}"]`)
+        ?.removeAttribute("disabled");
+    }
+  }
+
+  /** Shared apply_fix WS call + result handling for both the batch and single-row flows. */
+  async _applyCandidates(indices, replacement, dryRun) {
+    const statId = this._statId || this._q("stat-input")?.value.trim() || "";
+    const candidates = indices.map((i) => ({
+      start_ts: this._candidates[i].start / 1000,
+      period: this._candidates[i].period,
+    }));
 
     try {
       const result = await this._send({
@@ -1203,9 +1257,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
       }
 
       if (!dryRun) {
-        const removed = new Set(this._selected);
-        this._candidates = this._candidates.filter((_, i) => !removed.has(i));
-        this._selected = new Set();
+        this._removeCandidates(indices);
         if (this._candidates.length) {
           this._renderTable();
         } else {
@@ -1220,9 +1272,23 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
       }
     } catch (e) {
       this._showStatus("error", `Apply failed: ${e.message || JSON.stringify(e)}`);
-    } finally {
-      if (this._selected.size) this._q("btn-apply").disabled = false;
     }
+  }
+
+  /** Drop candidates at `removedIndices` and remap `_selected` onto the new positions. */
+  _removeCandidates(removedIndices) {
+    const removed = new Set(removedIndices);
+    const remap = new Map(); // old index -> new index
+    let newIdx = 0;
+    this._candidates.forEach((_, i) => {
+      if (!removed.has(i)) remap.set(i, newIdx++);
+    });
+    this._candidates = this._candidates.filter((_, i) => !removed.has(i));
+    const newSelected = new Set();
+    this._selected.forEach((i) => {
+      if (remap.has(i)) newSelected.add(remap.get(i));
+    });
+    this._selected = newSelected;
   }
 
   // ---------------------------------------------------------------------------
