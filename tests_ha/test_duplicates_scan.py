@@ -1,21 +1,17 @@
-"""Integration tests for scan_duplicates against a real in-process recorder."""
+"""Integration tests for correlate_duplicate_group against a real in-process recorder."""
 
 from __future__ import annotations
 
 import pytest
-from homeassistant.components.recorder.statistics import (
-    async_add_external_statistics,
-    async_import_statistics,
-)
+from homeassistant.components.recorder.statistics import async_import_statistics
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-from custom_components.recorder_toolkit.duplicates import scan_duplicates
+from custom_components.recorder_toolkit.duplicates import correlate_duplicate_group
 
 KITCHEN_A = "sensor.kitchen_power_a"
 KITCHEN_B = "sensor.kitchen_power_b"
 ATTIC_TEMP = "sensor.attic_temperature"
-EXTERNAL_DUPLICATE = "duptest:kitchen_power_c"
 
 
 def _hours(start: str, count: int, values: list[float]) -> list[dict]:
@@ -28,11 +24,10 @@ def _hours(start: str, count: int, values: list[float]) -> list[dict]:
 
 @pytest.fixture
 async def seeded_hass(hass: HomeAssistant, recorder_mock, recorder_db_path):
-    """Two correlated 'kitchen power' sensors (same unit, similar name), one
-    unrelated sensor sharing the unit but a dissimilar name/value shape, and
-    one *external* (non-"recorder"-sourced, non-sensor-domain) statistic that
-    would also match on unit/name/correlation — proving it's excluded from
-    the scan, since duplicate detection is sensor-domain-only.
+    """Two correlated 'kitchen power' sensors and one unrelated (anti-
+    correlated) sensor, all fed in as one fuzzy group's members to
+    correlate_duplicate_group — it must confirm A+B and drop the unrelated
+    one, without ever having been told they were name-similar beforehand.
     """
     values = [float(i) for i in range(24)]
 
@@ -69,22 +64,9 @@ async def seeded_hass(hass: HomeAssistant, recorder_mock, recorder_db_path):
             "name": "Attic Temperature",
             "source": "recorder",
             "statistic_id": ATTIC_TEMP,
-            "unit_of_measurement": "W",  # same unit on purpose: name must reject this
-        },
-        _hours("2026-01-01T00:00:00+00:00", 24, [v * -1 for v in values]),
-    )
-    async_add_external_statistics(
-        hass,
-        {
-            "has_mean": True,
-            "has_sum": False,
-            "name": "Kitchen Power A",  # matches KITCHEN_A's name exactly
-            "source": "duptest",
-            "statistic_id": EXTERNAL_DUPLICATE,
             "unit_of_measurement": "W",
         },
-        # Perfectly correlated with KITCHEN_A too, if it were ever compared.
-        _hours("2026-01-01T00:00:00+00:00", 24, values),
+        _hours("2026-01-01T00:00:00+00:00", 24, [v * -1 for v in values]),
     )
     from pytest_homeassistant_custom_component.components.recorder.common import (
         async_wait_recording_done,
@@ -94,12 +76,16 @@ async def seeded_hass(hass: HomeAssistant, recorder_mock, recorder_db_path):
     return hass
 
 
-async def test_scan_duplicates_groups_correlated_same_named_sensors(seeded_hass):
+async def test_correlate_duplicate_group_confirms_correlated_members(seeded_hass):
     # B has fewer rows than A (12 vs 24), below the default 20-point overlap
     # floor, so min_overlap is lowered here to isolate this test to the
-    # ranking-by-completeness behavior rather than the overlap cutoff
-    # (covered separately in tests/test_duplicates.py).
-    groups = await scan_duplicates(seeded_hass, lookback_days=3650, min_overlap=10)
+    # ranking-by-completeness behavior rather than the overlap cutoff.
+    groups = await correlate_duplicate_group(
+        seeded_hass,
+        [KITCHEN_A, KITCHEN_B, ATTIC_TEMP],
+        lookback_days=3650,
+        min_overlap=10,
+    )
     assert len(groups) == 1
     group = groups[0]
     assert [m.entity_id for m in group] == [KITCHEN_A, KITCHEN_B]
@@ -107,20 +93,15 @@ async def test_scan_duplicates_groups_correlated_same_named_sensors(seeded_hass)
     assert group[1].row_count == 12
 
 
-async def test_scan_duplicates_does_not_group_dissimilar_names(seeded_hass):
-    groups = await scan_duplicates(seeded_hass, lookback_days=3650, min_overlap=10)
+async def test_correlate_duplicate_group_drops_anti_correlated_member(seeded_hass):
+    groups = await correlate_duplicate_group(
+        seeded_hass,
+        [KITCHEN_A, KITCHEN_B, ATTIC_TEMP],
+        lookback_days=3650,
+        min_overlap=10,
+    )
     grouped_ids = {m.entity_id for group in groups for m in group}
     assert ATTIC_TEMP not in grouped_ids
-
-
-async def test_scan_duplicates_excludes_non_sensor_statistics(seeded_hass):
-    # EXTERNAL_DUPLICATE matches KITCHEN_A on unit, name and correlation, but
-    # is not a "recorder"-sourced sensor.* statistic — including it would let
-    # generate_exclude_yaml emit an invalid (non-entity-id) recorder exclude.
-    groups = await scan_duplicates(seeded_hass, lookback_days=3650, min_overlap=10)
-    grouped_ids = {m.entity_id for group in groups for m in group}
-    assert EXTERNAL_DUPLICATE not in grouped_ids
-
 
 
 FRIDGE = "sensor.garage_fridge_energy"
@@ -176,10 +157,10 @@ async def sum_class_hass(hass: HomeAssistant, recorder_mock, recorder_db_path):
     return hass
 
 
-async def test_scan_duplicates_does_not_group_unrelated_sum_class_meters(sum_class_hass):
-    groups = await scan_duplicates(
-        sum_class_hass, lookback_days=3650, name_threshold=0.0, min_overlap=10
+async def test_correlate_duplicate_group_does_not_confirm_unrelated_sum_class_meters(
+    sum_class_hass,
+):
+    groups = await correlate_duplicate_group(
+        sum_class_hass, [FRIDGE, CHARGER], lookback_days=3650, min_overlap=10
     )
-    grouped_ids = {m.entity_id for group in groups for m in group}
-    assert FRIDGE not in grouped_ids
-    assert CHARGER not in grouped_ids
+    assert groups == []

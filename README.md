@@ -104,14 +104,22 @@ The fix ID is logged at INFO level after every `clean_outliers` call.
 
 ## Duplicate Finder
 
-The **Duplicate Finder** tab scans your numeric sensors' recorded history to
-find entities recording the same underlying measurement more than once
-(e.g. a smart plug and a whole-home energy monitor both tracking the same
-circuit). For each group of likely duplicates it suggests keeping whichever
-entity has the most complete history, and generates a copyable
-`recorder: exclude:` YAML block (using safe globs where possible) for the
-rest — you review and paste it into `configuration.yaml` yourself; nothing
-is written automatically.
+The **Duplicate Finder** tab finds entities recording the same underlying
+measurement more than once (e.g. a smart plug and a whole-home energy
+monitor both tracking the same circuit), in two steps:
+
+1. **Scan** groups your numeric sensors by matching unit and name — this
+   only looks at live entity state, never the recorder database, so it's
+   safe to run at any time regardless of how much history you have.
+2. **Check correlation**, per group, reads that group's recorded history and
+   confirms whether its members actually rise and fall together. This is
+   the expensive step, so it only ever runs for the group you click — never
+   automatically for every match a scan finds.
+
+For each confirmed group it suggests keeping whichever entity has the most
+complete history, and generates a copyable `recorder: exclude:` YAML block
+(using safe globs where possible) for the rest — you review and paste it
+into `configuration.yaml` yourself; nothing is written automatically.
 
 ---
 

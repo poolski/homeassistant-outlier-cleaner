@@ -35,7 +35,13 @@ before(() => {
   assert.ok(ViewElement, "duplicate-finder-view should be registered on load");
 });
 
-const GROUPS = [
+// Phase 1 (fuzzy match) result: bare member ids, no stats yet.
+const FUZZY_GROUPS = [
+  { members: ["sensor.kitchen_power_a", "sensor.kitchen_power_b"] },
+];
+
+// Phase 2 (correlate) result for that same group: confirmed, with stats.
+const CORRELATED_GROUPS = [
   {
     members: [
       { entity_id: "sensor.kitchen_power_a", row_count: 24, earliest_start_ms: 0 },
@@ -44,10 +50,13 @@ const GROUPS = [
   },
 ];
 
-function mount({ scanResult = { groups: [] }, yamlResult = { yaml: "" } } = {}) {
+function mount({ scanResult = { groups: [] }, correlateResult, yamlResult = { yaml: "" } } = {}) {
   const el = new ViewElement();
   el._send = (msg) => {
     if (msg.type.endsWith("list_duplicate_candidates")) return Promise.resolve(scanResult);
+    if (msg.type.endsWith("correlate_duplicate_group")) {
+      return Promise.resolve(correlateResult || { groups: [] });
+    }
     if (msg.type.endsWith("generate_exclude_yaml")) return Promise.resolve(yamlResult);
     return Promise.resolve({});
   };
@@ -55,33 +64,96 @@ function mount({ scanResult = { groups: [] }, yamlResult = { yaml: "" } } = {}) 
   return el;
 }
 
+async function scan(el) {
+  el.shadowRoot.getElementById("scan-button").click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+async function correlate(el, groupIndex = 0) {
+  el.shadowRoot.getElementById(`correlate-button-${groupIndex}`).click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 describe("duplicate-finder-view", () => {
-  test("scan button triggers list_duplicate_candidates and renders groups", async () => {
-    const el = mount({ scanResult: { groups: GROUPS } });
-    el.shadowRoot.getElementById("scan-button").click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+  test("scan button triggers list_duplicate_candidates and renders unconfirmed groups", async () => {
+    const el = mount({ scanResult: { groups: FUZZY_GROUPS } });
+    await scan(el);
     const rows = el.shadowRoot.querySelectorAll("[data-entity-id]");
     const ids = Array.from(rows).map((r) => r.dataset.entityId);
     assert.deepEqual(ids, ["sensor.kitchen_power_a", "sensor.kitchen_power_b"]);
+    // Nothing has been correlated yet, so no keep-selection radios exist.
+    assert.equal(el.shadowRoot.querySelectorAll("input[type='radio']").length, 0);
+    assert.ok(el.shadowRoot.getElementById("correlate-button-0"));
     window.document.body.removeChild(el);
   });
 
-  test("suggested keep (most complete entity) is pre-selected", async () => {
-    const el = mount({ scanResult: { groups: GROUPS } });
-    el.shadowRoot.getElementById("scan-button").click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+  test("scan does not call correlate_duplicate_group on its own", async () => {
+    let correlateCalled = false;
+    const el = new ViewElement();
+    el._send = (msg) => {
+      if (msg.type.endsWith("list_duplicate_candidates")) return Promise.resolve({ groups: FUZZY_GROUPS });
+      if (msg.type.endsWith("correlate_duplicate_group")) correlateCalled = true;
+      return Promise.resolve({});
+    };
+    window.document.body.appendChild(el);
+    await scan(el);
+    assert.equal(correlateCalled, false);
+    window.document.body.removeChild(el);
+  });
+
+  test("check correlation sends only that group's members and renders the confirmed result", async () => {
+    let sentMembers = null;
+    const el = new ViewElement();
+    el._send = (msg) => {
+      if (msg.type.endsWith("list_duplicate_candidates")) return Promise.resolve({ groups: FUZZY_GROUPS });
+      if (msg.type.endsWith("correlate_duplicate_group")) {
+        sentMembers = msg.members;
+        return Promise.resolve({ groups: CORRELATED_GROUPS });
+      }
+      return Promise.resolve({});
+    };
+    window.document.body.appendChild(el);
+    await scan(el);
+    await correlate(el, 0);
+    assert.deepEqual(sentMembers, ["sensor.kitchen_power_a", "sensor.kitchen_power_b"]);
     const checkedRadio = el.shadowRoot.querySelector("input[type='radio']:checked");
     assert.equal(checkedRadio.value, "sensor.kitchen_power_a");
     window.document.body.removeChild(el);
   });
 
+  test("a fuzzy group that fails to correlate into any pair shows 'no duplicates confirmed'", async () => {
+    const el = mount({ scanResult: { groups: FUZZY_GROUPS }, correlateResult: { groups: [] } });
+    await scan(el);
+    await correlate(el, 0);
+    const group = el.shadowRoot.querySelector('[data-group-index="0"]');
+    assert.match(group.textContent, /no duplicates confirmed/i);
+    assert.equal(el.shadowRoot.querySelectorAll("input[type='radio']").length, 0);
+    window.document.body.removeChild(el);
+  });
+
+  test("a rejected correlation check shows an error for that group", async () => {
+    const el = new ViewElement();
+    el._send = (msg) => {
+      if (msg.type.endsWith("list_duplicate_candidates")) return Promise.resolve({ groups: FUZZY_GROUPS });
+      if (msg.type.endsWith("correlate_duplicate_group")) return Promise.reject(new Error("boom"));
+      return Promise.resolve({});
+    };
+    window.document.body.appendChild(el);
+    await scan(el);
+    await correlate(el, 0);
+    const group = el.shadowRoot.querySelector('[data-group-index="0"]');
+    assert.match(group.textContent, /boom/);
+    window.document.body.removeChild(el);
+  });
+
   test("generate YAML button sends the current keep selection and renders the result", async () => {
     const el = mount({
-      scanResult: { groups: GROUPS },
+      scanResult: { groups: FUZZY_GROUPS },
+      correlateResult: { groups: CORRELATED_GROUPS },
       yamlResult: { yaml: "recorder:\n  exclude:\n    entities:\n      - sensor.kitchen_power_b\n" },
     });
-    el.shadowRoot.getElementById("scan-button").click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await scan(el);
+    await correlate(el, 0);
     el.shadowRoot.getElementById("generate-yaml-button").click();
     await new Promise((resolve) => setTimeout(resolve, 0));
     const output = el.shadowRoot.getElementById("yaml-output");
@@ -90,18 +162,20 @@ describe("duplicate-finder-view", () => {
   });
 
   test("overriding the keep selection changes what generate_exclude_yaml is sent", async () => {
-    const el = mount({ scanResult: { groups: GROUPS } });
     let sentSelections = null;
+    const el = new ViewElement();
     el._send = (msg) => {
-      if (msg.type.endsWith("list_duplicate_candidates")) return Promise.resolve({ groups: GROUPS });
+      if (msg.type.endsWith("list_duplicate_candidates")) return Promise.resolve({ groups: FUZZY_GROUPS });
+      if (msg.type.endsWith("correlate_duplicate_group")) return Promise.resolve({ groups: CORRELATED_GROUPS });
       if (msg.type.endsWith("generate_exclude_yaml")) {
         sentSelections = msg.group_selections;
         return Promise.resolve({ yaml: "" });
       }
       return Promise.resolve({});
     };
-    el.shadowRoot.getElementById("scan-button").click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    window.document.body.appendChild(el);
+    await scan(el);
+    await correlate(el, 0);
     // Override: keep B instead of the suggested A.
     const radioB = el.shadowRoot.querySelector("input[value='sensor.kitchen_power_b']");
     radioB.checked = true;

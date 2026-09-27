@@ -1,13 +1,5 @@
 # Changelog
 
-## Unreleased
-
-### ⚠ BREAKING CHANGES
-
-* renamed the integration domain from `statistics_outlier_cleaner` to
-  `recorder_toolkit` to reflect the addition of duplicate-entity detection.
-  Update your `configuration.yaml` key accordingly.
-
 ## [1.0.0](https://github.com/poolski/homeassistant-outlier-cleaner/compare/v0.4.2...v1.0.0) (2026-09-27)
 
 

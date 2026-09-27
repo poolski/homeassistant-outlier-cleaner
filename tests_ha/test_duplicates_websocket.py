@@ -1,4 +1,4 @@
-"""Integration tests for the list_duplicate_candidates websocket command."""
+"""Integration tests for the duplicate-finder websocket commands."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from pytest_homeassistant_custom_component.components.recorder.common import (
 )
 
 from custom_components.recorder_toolkit.const import (
+    WS_CORRELATE_DUPLICATE_GROUP,
     WS_GENERATE_EXCLUDE_YAML,
     WS_LIST_DUPLICATE_CANDIDATES,
 )
@@ -30,6 +31,11 @@ async def seeded_hass(hass: HomeAssistant, recorder_mock, recorder_db_path):
         for i in range(24)
     ]
     for statistic_id, name in ((STAT_A, "Kitchen Power A"), (STAT_B, "Kitchen Power B")):
+        hass.states.async_set(
+            statistic_id,
+            "1.0",
+            {"unit_of_measurement": "W", "state_class": "measurement", "friendly_name": name},
+        )
         async_import_statistics(
             hass,
             {
@@ -47,12 +53,29 @@ async def seeded_hass(hass: HomeAssistant, recorder_mock, recorder_db_path):
     return hass
 
 
-async def test_list_duplicate_candidates_returns_grouped_result(
+async def test_list_duplicate_candidates_returns_fuzzy_grouped_result(
+    seeded_hass, hass_ws_client
+):
+    client = await hass_ws_client(seeded_hass)
+    await client.send_json({"id": 1, "type": WS_LIST_DUPLICATE_CANDIDATES})
+    response = await client.receive_json()
+    assert response["success"]
+    groups = response["result"]["groups"]
+    assert len(groups) == 1
+    assert groups[0]["members"] == [STAT_A, STAT_B]
+
+
+async def test_correlate_duplicate_group_confirms_and_returns_stats(
     seeded_hass, hass_ws_client
 ):
     client = await hass_ws_client(seeded_hass)
     await client.send_json(
-        {"id": 1, "type": WS_LIST_DUPLICATE_CANDIDATES, "lookback_days": 3650}
+        {
+            "id": 2,
+            "type": WS_CORRELATE_DUPLICATE_GROUP,
+            "members": [STAT_A, STAT_B],
+            "lookback_days": 3650,
+        }
     )
     response = await client.receive_json()
     assert response["success"]
@@ -60,6 +83,7 @@ async def test_list_duplicate_candidates_returns_grouped_result(
     assert len(groups) == 1
     member_ids = [m["entity_id"] for m in groups[0]["members"]]
     assert member_ids == [STAT_A, STAT_B]
+    assert groups[0]["members"][0]["row_count"] == 24
 
 
 async def test_generate_exclude_yaml_excludes_non_kept_members(
@@ -68,7 +92,7 @@ async def test_generate_exclude_yaml_excludes_non_kept_members(
     client = await hass_ws_client(seeded_hass)
     await client.send_json(
         {
-            "id": 2,
+            "id": 3,
             "type": WS_GENERATE_EXCLUDE_YAML,
             "group_selections": [
                 {"members": [STAT_A, STAT_B], "keep": STAT_A},
@@ -88,7 +112,7 @@ async def test_generate_exclude_yaml_honours_user_override_of_suggested_keep(
     # User picked STAT_B to keep instead of the (unspecified-here) default.
     await client.send_json(
         {
-            "id": 3,
+            "id": 4,
             "type": WS_GENERATE_EXCLUDE_YAML,
             "group_selections": [
                 {"members": [STAT_A, STAT_B], "keep": STAT_B},
@@ -101,7 +125,6 @@ async def test_generate_exclude_yaml_honours_user_override_of_suggested_keep(
     assert STAT_B not in response["result"]["yaml"]
 
 
-
 async def test_generate_exclude_yaml_glob_never_matches_a_kept_entity_missing_from_states(
     seeded_hass, hass_ws_client
 ):
@@ -111,13 +134,13 @@ async def test_generate_exclude_yaml_glob_never_matches_a_kept_entity_missing_fr
     # ("sensor.power_*") also matches "sensor.power_1" as a string pattern,
     # so accepting it would silently stop recording the entity the user
     # chose to keep.
-    seeded_hass.states.async_set("sensor.power_2", "1")
-    seeded_hass.states.async_set("sensor.power_3", "2")
+    seeded_hass.states.async_set("sensor.power_2", "1", {"unit_of_measurement": "W"})
+    seeded_hass.states.async_set("sensor.power_3", "2", {"unit_of_measurement": "W"})
 
     client = await hass_ws_client(seeded_hass)
     await client.send_json(
         {
-            "id": 4,
+            "id": 5,
             "type": WS_GENERATE_EXCLUDE_YAML,
             "group_selections": [
                 {
@@ -136,14 +159,13 @@ async def test_generate_exclude_yaml_glob_never_matches_a_kept_entity_missing_fr
     assert "sensor.power_1" not in yaml_text
 
 
-
 async def test_generate_exclude_yaml_rejects_keep_not_in_members(
     seeded_hass, hass_ws_client
 ):
     client = await hass_ws_client(seeded_hass)
     await client.send_json(
         {
-            "id": 5,
+            "id": 6,
             "type": WS_GENERATE_EXCLUDE_YAML,
             "group_selections": [
                 # "keep" is a typo/stale id, not one of this group's members —
