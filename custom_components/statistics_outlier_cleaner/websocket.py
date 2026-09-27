@@ -140,6 +140,9 @@ async def ws_fetch_outliers(
             {
                 vol.Required("start_ts"): vol.Coerce(float),
                 vol.Required("period"): vol.In(["hour", "5minute"]),
+                # Per-candidate override; falls back to the top-level
+                # "replacement" below when omitted (see apply_fix_sync).
+                vol.Optional("replacement"): vol.Coerce(float),
             }
         ],
         vol.Optional("replacement", default=DEFAULT_REPLACEMENT): vol.Coerce(float),

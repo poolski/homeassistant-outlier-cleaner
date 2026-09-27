@@ -844,6 +844,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
               Preview only (no DB changes)
             </label>
             <button class="danger" id="btn-apply">Apply Fix</button>
+            <button class="secondary" id="btn-auto-selected">Auto-fix Selected</button>
           </div>
         </div>
       </div>
@@ -910,6 +911,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     this._updateMethodOptions(); // render initial help box
     this._q("btn-scan").addEventListener("click", () => this._scan());
     this._q("btn-apply").addEventListener("click", () => this._applyFix());
+    this._q("btn-auto-selected").addEventListener("click", () => this._applyAutoFixSelected());
     this._q("btn-select-all").addEventListener("click", () => this._selectAll(true));
     this._q("btn-select-none").addEventListener("click", () => this._selectAll(false));
     this._q("btn-refresh-history").addEventListener("click", () => this._loadHistory());
@@ -1176,6 +1178,7 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     const n = this._selected.size, total = this._candidates.length;
     this._q("selection-count").textContent = total ? `${n} of ${total} selected` : "";
     this._q("btn-apply").disabled = n === 0;
+    this._q("btn-auto-selected").disabled = n === 0;
     this._renderApplySummary();
   }
 
@@ -1226,27 +1229,66 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
     }
   }
 
-  /** Shared apply_fix WS call + result handling for both the batch and single-row flows. */
-  async _applyCandidates(indices, replacement, dryRun) {
+  /**
+   * Apply each selected row's own suggested value in a single batched
+   * DB transaction (one fix_id), instead of the shared replacement field.
+   */
+  async _applyAutoFixSelected() {
+    const eligible = [...this._selected].filter(
+      (i) => this._candidates[i]?.suggested != null
+    );
+    if (!eligible.length) {
+      this._showStatus("error", "None of the selected rows have a suggested value.");
+      return;
+    }
+
+    const skipped = this._selected.size - eligible.length;
+    const dryRun = this._q("dry-run").checked;
+    const perRow = new Map(eligible.map((i) => [i, this._candidates[i].suggested]));
+
+    this._showStatus("info", dryRun ? "Running dry-run…" : `Auto-fixing ${eligible.length} row(s)…`);
+    this._q("btn-auto-selected").disabled = true;
+    try {
+      await this._applyCandidates(
+        eligible,
+        perRow,
+        dryRun,
+        skipped ? ` (${skipped} skipped — no suggestion)` : ""
+      );
+    } finally {
+      if (this._selected.size) this._q("btn-auto-selected").disabled = false;
+    }
+  }
+
+  /**
+   * Shared apply_fix WS call + result handling for the batch, single-row, and
+   * auto-fix-selected flows. `replacement` is either one number applied to
+   * every row in `indices`, or a `Map<index, number>` giving each its own
+   * value — sent as a per-candidate override in a single WS call so the
+   * backend backs them all up under one fix_id/transaction.
+   */
+  async _applyCandidates(indices, replacement, dryRun, noteSuffix = "") {
+    const perRow = replacement instanceof Map;
     const statId = this._statId || this._q("stat-input")?.value.trim() || "";
-    const candidates = indices.map((i) => ({
-      start_ts: this._candidates[i].start / 1000,
-      period: this._candidates[i].period,
-    }));
+    const candidates = indices.map((i) => {
+      const c = { start_ts: this._candidates[i].start / 1000, period: this._candidates[i].period };
+      if (perRow) c.replacement = replacement.get(i);
+      return c;
+    });
 
     try {
       const result = await this._send({
         type: WS.apply_fix,
         statistic_id: statId,
         candidates,
-        replacement,
+        replacement: perRow ? 0 : replacement,
         dry_run: dryRun,
       });
 
       const hasErrors = result.errors?.length > 0;
-      const msg = dryRun
+      const msg = (dryRun
         ? `Dry run: would fix ${result.planned} row(s).`
-        : `Fixed ${result.applied} row(s). Fix ID: <span class="fix-id-chip">${result.fix_id}</span>`;
+        : `Fixed ${result.applied} row(s). Fix ID: <span class="fix-id-chip">${result.fix_id}</span>`) + noteSuffix;
       this._showStatus(hasErrors ? "error" : "success", msg);
 
       if (dryRun && result.queries && result.queries.length) {

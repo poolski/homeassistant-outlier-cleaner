@@ -397,6 +397,36 @@ class TestApplyFixSyncHourly:
         rows = _lts_rows(conn, 1)
         assert rows[1]["state"] == pytest.approx(1_000_100.0)
 
+    def test_per_candidate_replacement_overrides_global(self, preloaded_conn):
+        """A candidate's own "replacement" key wins over the function's global default."""
+        conn = preloaded_conn
+        apply_fix_sync(
+            conn,
+            statistic_id="sensor.test",
+            metadata_id=1,
+            candidates=[{"start_ts": 3600.0, "period": "hour", "replacement": 500.0}],
+            replacement=0.0,  # must be ignored in favour of the per-candidate value
+            fix_id=_fix_id(),
+            fix_ts=time.time(),
+        )
+        rows = _lts_rows(conn, 1)
+        # prev_sum=100, per-candidate replacement=500 -> spike sum = 600, not 100
+        assert rows[1]["sum"] == pytest.approx(600.0)
+
+    def test_candidate_without_override_falls_back_to_global(self, preloaded_conn):
+        conn = preloaded_conn
+        apply_fix_sync(
+            conn,
+            statistic_id="sensor.test",
+            metadata_id=1,
+            candidates=[{"start_ts": 3600.0, "period": "hour"}],  # no "replacement" key
+            replacement=25.0,
+            fix_id=_fix_id(),
+            fix_ts=time.time(),
+        )
+        rows = _lts_rows(conn, 1)
+        assert rows[1]["sum"] == pytest.approx(125.0)
+
 
 # ---------------------------------------------------------------------------
 # apply_fix_sync — 5-minute candidates

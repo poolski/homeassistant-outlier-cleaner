@@ -103,10 +103,15 @@ def apply_fix_sync(
 ) -> dict[str, Any]:
     """Fix outlier candidates in the SQLite database.
 
-    For each candidate dict ``{"start_ts": float, "period": "hour"|"5minute"}``:
+    For each candidate dict ``{"start_ts": float, "period": "hour"|"5minute",
+    "replacement": float (optional)}``:
 
     1. Compute the existing ``change`` = sum[spike] - sum[prev_row].
-    2. delta = replacement - change.  If delta == 0, skip.
+    2. delta = replacement - change, where ``replacement`` is the candidate's
+       own ``"replacement"`` if given, else the function's ``replacement``
+       argument. This lets one call apply a different suggested value per row
+       (all backed up under the same ``fix_id``) instead of one shared value.
+       If delta == 0, skip.
     3. Back up all rows that will be modified (STS rows >= sts_spike_ts,
        LTS rows >= lts_spike_ts).
     4. Cascade delta forward through STS first, then LTS.
@@ -146,7 +151,8 @@ def apply_fix_sync(
         prev_sum = (prev_row["sum"] or 0.0) if prev_row else 0.0
         spike_sum = spike_row["sum"] or 0.0
         change = spike_sum - prev_sum
-        delta = replacement - change
+        row_replacement = candidate.get("replacement", replacement)
+        delta = row_replacement - change
 
         if abs(delta) < 1e-9:
             continue
