@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/poolski/homeassistant-outlier-cleaner/compare/v0.3.1...v0.4.0) (2026-09-27)
+
+
+### Features
+
+* **outlier:** suggest an auto-fix value for each detected outlier ([#12](https://github.com/poolski/homeassistant-outlier-cleaner/issues/12)) ([ba0c798](https://github.com/poolski/homeassistant-outlier-cleaner/commit/ba0c79882a9fde9d99ccbcb4e569185ab97115c4))
+
 ## [0.3.1](https://github.com/poolski/homeassistant-outlier-cleaner/compare/v0.3.0...v0.3.1) (2026-09-27)
 
 
