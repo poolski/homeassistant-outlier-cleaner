@@ -8,6 +8,7 @@ added in a later task.
 
 from __future__ import annotations
 
+import fnmatch
 import math
 import re
 from dataclasses import dataclass
@@ -176,3 +177,67 @@ def rank_by_completeness(
     Index 0 is the suggested entity to keep.
     """
     return sorted(members, key=lambda m: (-m.row_count, m.earliest_start_ms))
+
+
+def _common_glob(entity_ids: list[str]) -> str | None:
+    """Return one glob covering every id, or None if they don't share one.
+
+    Strips a trailing run of digits (with an optional separating `_`/`-`)
+    from each id; if every id reduces to the same prefix, the glob is
+    `<prefix>*`. A single-member group never gets a glob (nothing to gain).
+    """
+    if len(entity_ids) < 2:
+        return None
+    prefixes = set()
+    for entity_id in entity_ids:
+        match = re.match(r"^(.*?[_-]?)\d+$", entity_id)
+        prefixes.add(match.group(1) if match else entity_id)
+    if len(prefixes) != 1:
+        return None
+    return f"{next(iter(prefixes))}*"
+
+
+def _glob_is_safe(glob: str, excluded_ids: set[str], all_known_ids: set[str]) -> bool:
+    """A glob is safe only if it matches the excluded ids and nothing else."""
+    matched = {eid for eid in all_known_ids if fnmatch.fnmatchcase(eid, glob)}
+    return bool(matched) and matched <= excluded_ids
+
+
+def build_exclude_config(
+    exclude_groups: list[list[str]], all_known_entity_ids: set[str]
+) -> dict[str, list[str]]:
+    """Turn confirmed-exclude groups into a recorder exclude config.
+
+    Prefers a glob per group when one exists and is provably safe (matches
+    no entity outside that group); falls back to explicit entity ids
+    otherwise, per group.
+    """
+    globs: list[str] = []
+    entities: list[str] = []
+    for group in exclude_groups:
+        candidate = _common_glob(group)
+        if candidate and _glob_is_safe(candidate, set(group), all_known_entity_ids):
+            globs.append(candidate)
+        else:
+            entities.extend(group)
+
+    config: dict[str, list[str]] = {}
+    if globs:
+        config["entity_globs"] = sorted(globs)
+    if entities:
+        config["entities"] = sorted(entities)
+    return config
+
+
+def render_exclude_yaml(config: dict[str, list[str]]) -> str:
+    """Render a `recorder: exclude:` YAML block for a build_exclude_config result."""
+    if not config:
+        return ""
+    lines = ["recorder:", "  exclude:"]
+    if "entity_globs" in config:
+        lines.append("    entity_globs:")
+        lines.extend(f"      - {glob}" for glob in config["entity_globs"])
+    if "entities" in config:
+        lines.append("    entities:")
+        lines.extend(f"      - {entity_id}" for entity_id in config["entities"])
+    return "\n".join(lines) + "\n"

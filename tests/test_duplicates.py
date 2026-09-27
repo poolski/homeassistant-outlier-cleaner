@@ -10,11 +10,13 @@ from custom_components.recorder_toolkit.duplicates import (
     EntityCompleteness,
     align_series,
     build_candidate_pairs,
+    build_exclude_config,
     group_duplicates,
     name_similarity,
     pearson_correlation,
     pick_correlation_column,
     rank_by_completeness,
+    render_exclude_yaml,
 )
 
 
@@ -162,3 +164,60 @@ def test_rank_by_completeness_ties_broken_by_earliest_start():
     ]
     ranked = rank_by_completeness(members)
     assert [m.entity_id for m in ranked] == ["sensor.b", "sensor.a"]
+
+
+def test_build_exclude_config_collapses_safe_group_into_glob():
+    exclude_groups = [["sensor.kitchen_power_2", "sensor.kitchen_power_3"]]
+    all_known = {
+        "sensor.kitchen_power",
+        "sensor.kitchen_power_2",
+        "sensor.kitchen_power_3",
+    }
+    config = build_exclude_config(exclude_groups, all_known)
+    assert config == {"entity_globs": ["sensor.kitchen_power_*"]}
+
+
+def test_build_exclude_config_falls_back_when_glob_would_match_extra_entity():
+    exclude_groups = [["sensor.kitchen_power_2", "sensor.kitchen_power_3"]]
+    # sensor.kitchen_power_4 exists and is NOT in the exclude group — a glob
+    # here would silently start excluding it too, so it must be rejected.
+    all_known = {
+        "sensor.kitchen_power_2",
+        "sensor.kitchen_power_3",
+        "sensor.kitchen_power_4",
+    }
+    config = build_exclude_config(exclude_groups, all_known)
+    assert config == {
+        "entities": ["sensor.kitchen_power_2", "sensor.kitchen_power_3"]
+    }
+
+
+def test_build_exclude_config_single_entity_group_never_globs():
+    exclude_groups = [["sensor.kitchen_power_2"]]
+    all_known = {"sensor.kitchen_power_2"}
+    config = build_exclude_config(exclude_groups, all_known)
+    assert config == {"entities": ["sensor.kitchen_power_2"]}
+
+
+def test_build_exclude_config_no_groups_returns_empty_dict():
+    assert build_exclude_config([], set()) == {}
+
+
+def test_render_exclude_yaml_includes_both_keys_when_present():
+    config = {
+        "entity_globs": ["sensor.kitchen_power_*"],
+        "entities": ["sensor.attic_power_backup"],
+    }
+    yaml_text = render_exclude_yaml(config)
+    assert yaml_text == (
+        "recorder:\n"
+        "  exclude:\n"
+        "    entity_globs:\n"
+        "      - sensor.kitchen_power_*\n"
+        "    entities:\n"
+        "      - sensor.attic_power_backup\n"
+    )
+
+
+def test_render_exclude_yaml_empty_config_returns_empty_string():
+    assert render_exclude_yaml({}) == ""
