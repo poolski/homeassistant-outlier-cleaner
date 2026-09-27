@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from difflib import SequenceMatcher
 
@@ -156,3 +157,22 @@ def group_duplicates(confirmed_pairs: list[tuple[str, str]]) -> list[list[str]]:
         groups.setdefault(find(node), []).append(node)
 
     return sorted((sorted(members) for members in groups.values()), key=lambda g: g[0])
+
+
+@dataclass(frozen=True)
+class EntityCompleteness:
+    """One duplicate-group member's data-completeness stats."""
+
+    entity_id: str
+    row_count: int
+    earliest_start_ms: int
+
+
+def rank_by_completeness(
+    members: list[EntityCompleteness],
+) -> list[EntityCompleteness]:
+    """Rank group members best-first: most rows, then earliest start.
+
+    Index 0 is the suggested entity to keep.
+    """
+    return sorted(members, key=lambda m: (-m.row_count, m.earliest_start_ms))

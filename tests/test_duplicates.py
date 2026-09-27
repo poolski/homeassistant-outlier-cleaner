@@ -7,12 +7,14 @@ from datetime import datetime, timezone
 import pytest
 
 from custom_components.recorder_toolkit.duplicates import (
+    EntityCompleteness,
     align_series,
     build_candidate_pairs,
     group_duplicates,
     name_similarity,
     pearson_correlation,
     pick_correlation_column,
+    rank_by_completeness,
 )
 
 
@@ -142,3 +144,21 @@ def test_group_duplicates_keeps_disjoint_pairs_separate():
 
 def test_group_duplicates_empty_input_returns_empty_list():
     assert group_duplicates([]) == []
+
+
+def test_rank_by_completeness_prefers_more_rows():
+    members = [
+        EntityCompleteness("sensor.a", row_count=10, earliest_start_ms=1000),
+        EntityCompleteness("sensor.b", row_count=100, earliest_start_ms=2000),
+    ]
+    ranked = rank_by_completeness(members)
+    assert [m.entity_id for m in ranked] == ["sensor.b", "sensor.a"]
+
+
+def test_rank_by_completeness_ties_broken_by_earliest_start():
+    members = [
+        EntityCompleteness("sensor.a", row_count=100, earliest_start_ms=2000),
+        EntityCompleteness("sensor.b", row_count=100, earliest_start_ms=1000),
+    ]
+    ranked = rank_by_completeness(members)
+    assert [m.entity_id for m in ranked] == ["sensor.b", "sensor.a"]
