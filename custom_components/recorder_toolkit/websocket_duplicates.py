@@ -14,16 +14,23 @@ from .const import (
     ATTR_CORRELATION_THRESHOLD,
     ATTR_GROUP_SELECTIONS,
     ATTR_LOOKBACK_DAYS,
+    ATTR_MEMBERS,
     ATTR_MIN_OVERLAP,
     ATTR_NAME_THRESHOLD,
     DEFAULT_CORRELATION_THRESHOLD,
     DEFAULT_DUPLICATE_LOOKBACK_DAYS,
     DEFAULT_MIN_OVERLAP_POINTS,
     DEFAULT_NAME_SIMILARITY_THRESHOLD,
+    WS_CORRELATE_DUPLICATE_GROUP,
     WS_GENERATE_EXCLUDE_YAML,
     WS_LIST_DUPLICATE_CANDIDATES,
 )
-from .duplicates import build_exclude_config, render_exclude_yaml, scan_duplicates
+from .duplicates import (
+    build_exclude_config,
+    correlate_duplicate_group,
+    find_fuzzy_duplicate_groups,
+    render_exclude_yaml,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,17 +39,43 @@ _LOGGER = logging.getLogger(__name__)
 def async_register_duplicate_commands(hass: HomeAssistant) -> None:
     """Register duplicate-finder WebSocket commands."""
     websocket_api.async_register_command(hass, ws_list_duplicate_candidates)
+    websocket_api.async_register_command(hass, ws_correlate_duplicate_group)
     websocket_api.async_register_command(hass, ws_generate_exclude_yaml)
 
 
 @websocket_api.websocket_command(
     {
         vol.Required("type"): WS_LIST_DUPLICATE_CANDIDATES,
-        vol.Optional(ATTR_LOOKBACK_DAYS, default=DEFAULT_DUPLICATE_LOOKBACK_DAYS): vol.All(
-            int, vol.Range(min=1)
-        ),
         vol.Optional(ATTR_NAME_THRESHOLD, default=DEFAULT_NAME_SIMILARITY_THRESHOLD): vol.All(
             vol.Coerce(float), vol.Range(min=0.0, max=1.0)
+        ),
+    }
+)
+@websocket_api.callback
+def ws_list_duplicate_candidates(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return cheaply fuzzy-matched (unconfirmed) duplicate candidate groups.
+
+    Reads only live entity state — no statistics/recorder access — so this
+    is safe to run on every scan. Confirming a group as a real duplicate is
+    a separate step: `ws_correlate_duplicate_group`.
+    """
+    groups = find_fuzzy_duplicate_groups(hass, msg[ATTR_NAME_THRESHOLD])
+    connection.send_result(
+        msg["id"],
+        {"groups": [{"members": members} for members in groups]},
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): WS_CORRELATE_DUPLICATE_GROUP,
+        vol.Required(ATTR_MEMBERS): [str],
+        vol.Optional(ATTR_LOOKBACK_DAYS, default=DEFAULT_DUPLICATE_LOOKBACK_DAYS): vol.All(
+            int, vol.Range(min=1)
         ),
         vol.Optional(
             ATTR_CORRELATION_THRESHOLD, default=DEFAULT_CORRELATION_THRESHOLD
@@ -53,16 +86,20 @@ def async_register_duplicate_commands(hass: HomeAssistant) -> None:
     }
 )
 @websocket_api.async_response
-async def ws_list_duplicate_candidates(
+async def ws_correlate_duplicate_group(
     hass: HomeAssistant,
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Scan for duplicate-recording entities and return grouped candidates."""
-    groups = await scan_duplicates(
+    """Read statistics for one fuzzy-matched group's members and confirm.
+
+    Only ever reads statistics for `members` — the group the client
+    explicitly asked to check — never for the whole install.
+    """
+    groups = await correlate_duplicate_group(
         hass,
+        msg[ATTR_MEMBERS],
         lookback_days=msg[ATTR_LOOKBACK_DAYS],
-        name_threshold=msg[ATTR_NAME_THRESHOLD],
         correlation_threshold=msg[ATTR_CORRELATION_THRESHOLD],
         min_overlap=msg[ATTR_MIN_OVERLAP],
     )

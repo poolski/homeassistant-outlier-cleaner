@@ -1,9 +1,18 @@
 """Duplicate-entity detection for the Recorder Toolkit.
 
 Finds groups of numeric sensors that record the same underlying measurement
-twice, so their recorder writes can be safely deduplicated. All functions in
-this module are pure and HA-free except the `scan_duplicates` orchestrator
-added in a later task.
+twice, so their recorder writes can be safely deduplicated. Detection is
+split into two phases so a scan never reads statistics for the whole
+install up front (that pattern overloaded the recorder executor and could
+crash HA on larger installs):
+
+- `find_fuzzy_duplicate_groups` — cheap, automatic, no statistics reads.
+  Groups numeric sensors by unit + name similarity from live entity state.
+- `correlate_duplicate_group` — only run when explicitly requested for one
+  fuzzy group; reads statistics for just that group's members to confirm
+  which of them are real duplicates.
+
+All functions in this module are pure and HA-free except these two.
 """
 
 from __future__ import annotations
@@ -14,12 +23,11 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
+from itertools import combinations
+from typing import Any, Iterable
 
 from homeassistant.components.recorder import get_instance
-from homeassistant.components.recorder.statistics import (
-    list_statistic_ids,
-    statistics_during_period,
-)
+from homeassistant.components.recorder.statistics import statistics_during_period
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
@@ -76,6 +84,48 @@ def build_candidate_pairs(
                     )
                     pairs.add(pair)  # type: ignore[arg-type]
     return sorted(pairs)
+
+
+_STATISTICS_ELIGIBLE_STATE_CLASSES = frozenset({"measurement", "total", "total_increasing"})
+
+
+def list_numeric_sensor_entities(states: Iterable[Any]) -> list[dict]:
+    """Build candidate-pairing input from live entity states, not statistics.
+
+    `states` items need `entity_id` and `attributes` (a dict), matching
+    `homeassistant.core.State` — e.g. the output of `hass.states.async_all`.
+    Deliberately reads nothing from the recorder/statistics tables: fuzzy
+    matching only needs unit + name, both already on the live state, so this
+    stays a cheap in-memory pass over entities HA already holds.
+    """
+    entities = []
+    for state in states:
+        if state.attributes.get("state_class") not in _STATISTICS_ELIGIBLE_STATE_CLASSES:
+            continue
+        entities.append(
+            {
+                "statistic_id": state.entity_id,
+                "unit_of_measurement": state.attributes.get("unit_of_measurement"),
+                "name": state.attributes.get("friendly_name"),
+            }
+        )
+    return entities
+
+
+def find_fuzzy_duplicate_groups(
+    hass: HomeAssistant,
+    name_threshold: float = DEFAULT_NAME_SIMILARITY_THRESHOLD,
+) -> list[list[str]]:
+    """Cheaply group numeric sensors that plausibly record the same thing.
+
+    Unit + name matching only, over live entity state — no statistics reads.
+    Safe to run automatically on every scan; confirming a fuzzy group as a
+    real duplicate is a separate, explicitly-triggered step
+    (`correlate_duplicate_group`), since that step does read statistics.
+    """
+    entities = list_numeric_sensor_entities(hass.states.async_all("sensor"))
+    pairs = build_candidate_pairs(entities, name_threshold)
+    return group_duplicates(pairs)
 
 
 def _start_ms(row: dict) -> int:
@@ -268,49 +318,26 @@ def render_exclude_yaml(config: dict[str, list[str]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-async def scan_duplicates(
+async def correlate_duplicate_group(
     hass: HomeAssistant,
+    member_ids: list[str],
     *,
     lookback_days: int = DEFAULT_DUPLICATE_LOOKBACK_DAYS,
-    name_threshold: float = DEFAULT_NAME_SIMILARITY_THRESHOLD,
     correlation_threshold: float = DEFAULT_CORRELATION_THRESHOLD,
     min_overlap: int = DEFAULT_MIN_OVERLAP_POINTS,
 ) -> list[list[EntityCompleteness]]:
-    """Scan numeric sensors for likely-duplicate groups.
+    """Confirm which members of one fuzzy-matched group are real duplicates.
 
-    Returns each group ranked best-first (index 0 = suggested keep).
+    Reads statistics only for `member_ids` — the group the caller explicitly
+    asked to check — never for the whole install. A fuzzy group can split
+    into more than one confirmed group (or none), since fuzzy matching on
+    unit + name doesn't guarantee every member actually correlates with
+    every other.
+
+    Returns each confirmed group ranked best-first (index 0 = suggested
+    keep).
     """
     recorder = get_instance(hass)
-    all_meta = await recorder.async_add_executor_job(list_statistic_ids, hass)
-
-    entities = []
-    for meta in all_meta:
-        if not (meta.get("has_mean") or meta.get("has_sum")):
-            continue
-        # Duplicate detection is scoped to numeric `sensor` entities recorded
-        # by this HA instance's own recorder (Global Constraint). Statistics
-        # imported from other sources use a non-"sensor." statistic_id (e.g.
-        # "opower:elec_usage") that isn't a valid entity_id, so including
-        # them here would let generate_exclude_yaml emit an invalid
-        # `recorder: exclude: entities:` block.
-        if meta.get("source") != "recorder" or not meta["statistic_id"].startswith(
-            "sensor."
-        ):
-            continue
-        name = meta.get("name")
-        if not name:
-            state = hass.states.get(meta["statistic_id"])
-            name = state.attributes.get("friendly_name") if state else None
-        entities.append(
-            {
-                "statistic_id": meta["statistic_id"],
-                "unit_of_measurement": meta.get("statistics_unit_of_measurement"),
-                "name": name,
-            }
-        )
-
-    candidate_pairs = build_candidate_pairs(entities, name_threshold)
-
     end_time = dt_util.utcnow()
     start_time = end_time - timedelta(days=lookback_days)
     rows_cache: dict[str, list[dict]] = {}
@@ -331,7 +358,7 @@ async def scan_duplicates(
         return rows_cache[statistic_id]
 
     confirmed_pairs: list[tuple[str, str]] = []
-    for a, b in candidate_pairs:
+    for a, b in combinations(sorted(member_ids), 2):
         rows_a = await rows_for(a)
         rows_b = await rows_for(b)
         column = pick_correlation_column(rows_a, rows_b)

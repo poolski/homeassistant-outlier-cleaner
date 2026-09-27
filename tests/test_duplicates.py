@@ -12,6 +12,7 @@ from custom_components.recorder_toolkit.duplicates import (
     build_candidate_pairs,
     build_exclude_config,
     group_duplicates,
+    list_numeric_sensor_entities,
     name_similarity,
     pearson_correlation,
     pick_correlation_column,
@@ -270,3 +271,44 @@ def test_pearson_correlation_on_diffed_sums_reveals_no_real_correlation():
     diffed_r = pearson_correlation(series_diff(cumulative_a), series_diff(cumulative_b))
     assert diffed_r is not None
     assert diffed_r < 0.5  # the real (lack of) correlation, once diffed
+
+
+
+class _FakeState:
+    """Duck-types the bits of homeassistant.core.State this module reads."""
+
+    def __init__(self, entity_id: str, attributes: dict):
+        self.entity_id = entity_id
+        self.attributes = attributes
+
+
+def test_list_numeric_sensor_entities_includes_measurement_state_class():
+    states = [
+        _FakeState(
+            "sensor.kitchen_power",
+            {"state_class": "measurement", "unit_of_measurement": "W", "friendly_name": "Kitchen Power"},
+        )
+    ]
+    assert list_numeric_sensor_entities(states) == [
+        {"statistic_id": "sensor.kitchen_power", "unit_of_measurement": "W", "name": "Kitchen Power"}
+    ]
+
+
+def test_list_numeric_sensor_entities_includes_total_and_total_increasing():
+    states = [
+        _FakeState("sensor.energy_total", {"state_class": "total", "unit_of_measurement": "kWh"}),
+        _FakeState("sensor.energy_ti", {"state_class": "total_increasing", "unit_of_measurement": "kWh"}),
+    ]
+    result = list_numeric_sensor_entities(states)
+    assert [e["statistic_id"] for e in result] == ["sensor.energy_total", "sensor.energy_ti"]
+
+
+def test_list_numeric_sensor_entities_skips_entities_without_state_class():
+    states = [_FakeState("sensor.plain_text", {"unit_of_measurement": "W"})]
+    assert list_numeric_sensor_entities(states) == []
+
+
+def test_list_numeric_sensor_entities_falls_back_to_none_name_when_no_friendly_name():
+    states = [_FakeState("sensor.kitchen_power", {"state_class": "measurement", "unit_of_measurement": "W"})]
+    result = list_numeric_sensor_entities(states)
+    assert result == [{"statistic_id": "sensor.kitchen_power", "unit_of_measurement": "W", "name": None}]
