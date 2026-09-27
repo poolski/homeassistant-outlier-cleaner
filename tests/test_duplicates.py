@@ -9,6 +9,7 @@ import pytest
 from custom_components.recorder_toolkit.duplicates import (
     align_series,
     build_candidate_pairs,
+    group_duplicates,
     name_similarity,
     pearson_correlation,
     pick_correlation_column,
@@ -122,3 +123,22 @@ def test_pearson_correlation_none_when_too_few_points():
 def test_pearson_correlation_none_when_zero_variance():
     # A constant series has zero variance; correlation is undefined, not an error.
     assert pearson_correlation([5.0, 5.0, 5.0], [1.0, 2.0, 3.0]) is None
+
+
+def test_group_duplicates_merges_transitive_pairs_into_one_group():
+    # a-b and b-c correlated => {a, b, c} is one group, even though a-c
+    # was never directly compared.
+    pairs = [("sensor.a", "sensor.b"), ("sensor.b", "sensor.c")]
+    assert group_duplicates(pairs) == [["sensor.a", "sensor.b", "sensor.c"]]
+
+
+def test_group_duplicates_keeps_disjoint_pairs_separate():
+    pairs = [("sensor.a", "sensor.b"), ("sensor.c", "sensor.d")]
+    assert group_duplicates(pairs) == [
+        ["sensor.a", "sensor.b"],
+        ["sensor.c", "sensor.d"],
+    ]
+
+
+def test_group_duplicates_empty_input_returns_empty_list():
+    assert group_duplicates([]) == []

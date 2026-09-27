@@ -126,3 +126,33 @@ def pearson_correlation(xs: list[float], ys: list[float]) -> float | None:
     if denom == 0:
         return None
     return (n * sum_xy - sum_x * sum_y) / denom
+
+
+def group_duplicates(confirmed_pairs: list[tuple[str, str]]) -> list[list[str]]:
+    """Group confirmed-duplicate pairs into connected components.
+
+    A 3-way duplicate (a-b and b-c both confirmed) becomes one group of
+    three, not two overlapping pairs.
+    """
+    parent: dict[str, str] = {}
+
+    def find(node: str) -> str:
+        parent.setdefault(node, node)
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    def union(a: str, b: str) -> None:
+        root_a, root_b = find(a), find(b)
+        if root_a != root_b:
+            parent[root_a] = root_b
+
+    for a, b in confirmed_pairs:
+        union(a, b)
+
+    groups: dict[str, list[str]] = {}
+    for node in parent:
+        groups.setdefault(find(node), []).append(node)
+
+    return sorted((sorted(members) for members in groups.values()), key=lambda g: g[0])
