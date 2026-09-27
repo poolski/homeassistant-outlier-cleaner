@@ -35,6 +35,11 @@ WS_FETCH_OUTLIERS: Final = f"{DOMAIN}/fetch_outliers"
 WS_APPLY_FIX: Final = f"{DOMAIN}/apply_fix"
 WS_LIST_FIXES: Final = f"{DOMAIN}/list_fixes"
 WS_RESTORE_FIX: Final = f"{DOMAIN}/restore_fix"
+WS_LIST_DUPLICATE_CANDIDATES: Final = f"{DOMAIN}/list_duplicate_candidates"
+
+ATTR_NAME_THRESHOLD: Final = "name_threshold"
+ATTR_CORRELATION_THRESHOLD: Final = "correlation_threshold"
+ATTR_MIN_OVERLAP: Final = "min_overlap"
 
 # Defaults
 DEFAULT_TOP_N: Final = 10
