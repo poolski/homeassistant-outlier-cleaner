@@ -13,6 +13,7 @@ Unlike the built-in Developer Tools > Statistics dialog, this integration:
 - Supports **scheduled automation** via a service action (safe detection methods: MAD, absolute threshold)
 - **Backs up** every affected row before mutating, with a one-click restore
 - Handles the **bounded spike** pattern (a jump up followed by a compensating drop) by letting you select and fix both rows in one operation
+- **Suggests a fix value per row**, based on the sensor's own history at the same time of day, with a one-click **Auto** button in the panel
 
 > [!WARNING]
 > This integration writes directly to the Home Assistant SQLite recorder database. It only supports SQLite (the default). MariaDB / PostgreSQL are not supported.
@@ -59,9 +60,13 @@ After installation a new **Outlier Cleaner** entry appears in the sidebar (admin
 
 1. Pick a statistic from the entity picker (only sum-capable statistics are offered; recent picks show as chips above it).
 2. Select a date range.
-3. Choose a detection method and click **Scan**.
-4. Check the rows you want to fix. Nothing is selected for you — a scan returns suggestions, and `top_n` in particular always returns N rows whether or not the data is clean. Set a replacement change value (default `0` removes the spike entirely).
-5. Click **Apply Fix to Selected**. The fix is recorded in the history table below with its fix ID.
+3. Choose a detection method and click **Scan**. Results are listed most recent first.
+4. For each flagged row you can either:
+   - Check the rows you want to fix, set a replacement change value (default `0` removes the spike entirely), and click **Apply Fix to Selected** — fixes every checked row with the same value; or
+   - Click that row's **Auto: X.XX** button to apply a per-row suggested value immediately (see [Auto-fix suggestions](#auto-fix-suggestions) below).
+
+   Nothing is selected for you — a scan returns suggestions, and `top_n` in particular always returns N rows whether or not the data is clean.
+5. Each applied fix is recorded in the history table below with its fix ID.
 6. To undo, click **Restore** next to the relevant history entry.
 
 ### Service action
@@ -175,6 +180,16 @@ Any hour showing more than 15 kWh of generation is flagged. Normal peaks (say 7 
 2. Click **Scan**. The 10 largest changes are shown.
 3. Review each row. Deselect any that look legitimate.
 4. Set a replacement value and click **Apply Fix to Selected**.
+
+---
+
+## Auto-fix suggestions
+
+For every flagged row, the panel computes a suggested replacement value: the **median** `change` at the **same time of day** over the trailing N days (default `7`, adjustable via the **Auto-fix lookback (days)** field next to the scan options). This gives each spike a sensor-specific, time-of-day-aware suggestion instead of a single flat replacement value.
+
+Click a row's **Auto: X.XX** button (next to the **State** column) to apply that suggestion to just that row immediately — no need to select it or set the shared replacement field. If there isn't enough history to suggest a value (e.g. the statistic is newer than the lookback window), the button is disabled.
+
+This is panel-only; the `clean_outliers` automation service still uses a single `replacement` value for every flagged row, since there's no user in the loop to review per-row suggestions.
 
 ---
 
