@@ -12,10 +12,23 @@ import fnmatch
 import math
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 
-from .const import DEFAULT_NAME_SIMILARITY_THRESHOLD
+from homeassistant.components.recorder import get_instance
+from homeassistant.components.recorder.statistics import (
+    list_statistic_ids,
+    statistics_during_period,
+)
+from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
+
+from .const import (
+    DEFAULT_CORRELATION_THRESHOLD,
+    DEFAULT_DUPLICATE_LOOKBACK_DAYS,
+    DEFAULT_MIN_OVERLAP_POINTS,
+    DEFAULT_NAME_SIMILARITY_THRESHOLD,
+)
 
 _NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 
@@ -241,3 +254,83 @@ def render_exclude_yaml(config: dict[str, list[str]]) -> str:
         lines.append("    entities:")
         lines.extend(f"      - {entity_id}" for entity_id in config["entities"])
     return "\n".join(lines) + "\n"
+
+
+async def scan_duplicates(
+    hass: HomeAssistant,
+    *,
+    lookback_days: int = DEFAULT_DUPLICATE_LOOKBACK_DAYS,
+    name_threshold: float = DEFAULT_NAME_SIMILARITY_THRESHOLD,
+    correlation_threshold: float = DEFAULT_CORRELATION_THRESHOLD,
+    min_overlap: int = DEFAULT_MIN_OVERLAP_POINTS,
+) -> list[list[EntityCompleteness]]:
+    """Scan numeric sensors for likely-duplicate groups.
+
+    Returns each group ranked best-first (index 0 = suggested keep).
+    """
+    recorder = get_instance(hass)
+    all_meta = await recorder.async_add_executor_job(list_statistic_ids, hass)
+
+    entities = []
+    for meta in all_meta:
+        if not (meta.get("has_mean") or meta.get("has_sum")):
+            continue
+        name = meta.get("name")
+        if not name:
+            state = hass.states.get(meta["statistic_id"])
+            name = state.attributes.get("friendly_name") if state else None
+        entities.append(
+            {
+                "statistic_id": meta["statistic_id"],
+                "unit_of_measurement": meta.get("statistics_unit_of_measurement"),
+                "name": name,
+            }
+        )
+
+    candidate_pairs = build_candidate_pairs(entities, name_threshold)
+
+    end_time = dt_util.utcnow()
+    start_time = end_time - timedelta(days=lookback_days)
+    rows_cache: dict[str, list[dict]] = {}
+
+    async def rows_for(statistic_id: str) -> list[dict]:
+        if statistic_id not in rows_cache:
+            raw = await recorder.async_add_executor_job(
+                statistics_during_period,
+                hass,
+                start_time,
+                end_time,
+                {statistic_id},
+                "hour",
+                None,
+                {"mean", "state"},
+            )
+            rows_cache[statistic_id] = raw.get(statistic_id, []) or []
+        return rows_cache[statistic_id]
+
+    confirmed_pairs: list[tuple[str, str]] = []
+    for a, b in candidate_pairs:
+        rows_a = await rows_for(a)
+        rows_b = await rows_for(b)
+        column = pick_correlation_column(rows_a, rows_b)
+        if column is None:
+            continue
+        xs, ys = align_series(rows_a, rows_b, column)
+        if len(xs) < min_overlap:
+            continue
+        r = pearson_correlation(xs, ys)
+        if r is not None and r >= correlation_threshold:
+            confirmed_pairs.append((a, b))
+
+    groups = group_duplicates(confirmed_pairs)
+
+    result: list[list[EntityCompleteness]] = []
+    for group in groups:
+        members = []
+        for entity_id in group:
+            rows = rows_cache.get(entity_id, [])
+            row_count = len(rows)
+            earliest = min((_start_ms(row) for row in rows), default=0)
+            members.append(EntityCompleteness(entity_id, row_count, earliest))
+        result.append(rank_by_completeness(members))
+    return result
