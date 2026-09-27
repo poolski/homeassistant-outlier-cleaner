@@ -1,4 +1,4 @@
-"""WebSocket API handlers for Statistics Outlier Cleaner."""
+"""WebSocket API handlers for Recorder Toolkit."""
 
 from __future__ import annotations
 

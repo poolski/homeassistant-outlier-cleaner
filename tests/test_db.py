@@ -18,7 +18,7 @@ import pytest
 
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent.parent))
 
-from custom_components.statistics_outlier_cleaner.db import (
+from custom_components.recorder_toolkit.db import (
     apply_fix_sync,
     ensure_backup_table,
     fetch_stats_rows,

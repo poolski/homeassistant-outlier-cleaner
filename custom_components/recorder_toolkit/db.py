@@ -1,4 +1,4 @@
-"""Direct SQLite operations for the Statistics Outlier Cleaner.
+"""Direct SQLite operations for the Recorder Toolkit.
 
 All public functions are synchronous and accept a raw ``sqlite3.Connection``.
 They must be called from within the recorder's executor via

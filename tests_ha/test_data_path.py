@@ -28,7 +28,7 @@ from pytest_homeassistant_custom_component.components.recorder.common import (
     async_wait_recording_done,
 )
 
-DOMAIN = "statistics_outlier_cleaner"
+DOMAIN = "recorder_toolkit"
 STATISTIC_ID = "outlier_test:spiky_energy"
 
 BASE = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)

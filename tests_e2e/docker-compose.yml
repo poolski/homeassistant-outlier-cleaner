@@ -17,7 +17,7 @@ services:
     volumes:
       # The integration under test. Read-write because Python writes __pycache__
       # next to the sources.
-      - ../custom_components/statistics_outlier_cleaner:/config/custom_components/statistics_outlier_cleaner
+      - ../custom_components/recorder_toolkit:/config/custom_components/recorder_toolkit
       - ./bootstrap.sh:/bootstrap.sh:ro
     environment:
       HASS_USERNAME: "${HASS_USERNAME:-dev}"

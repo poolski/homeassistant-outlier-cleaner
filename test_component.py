@@ -1,5 +1,5 @@
 """
-Smoke tests for the Statistics Outlier Cleaner component.
+Smoke tests for the Recorder Toolkit component.
 
 Validates that all required files are present, manifests and service
 schemas are well-formed, and the JavaScript panel contains the expected
@@ -25,7 +25,7 @@ import yaml
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BASE = os.path.join(os.path.dirname(__file__), "custom_components", "statistics_outlier_cleaner")
+BASE = os.path.join(os.path.dirname(__file__), "custom_components", "recorder_toolkit")
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +67,7 @@ def test_manifest_required_keys(manifest):
 
 
 def test_manifest_domain(manifest):
-    assert manifest["domain"] == "statistics_outlier_cleaner"
+    assert manifest["domain"] == "recorder_toolkit"
 
 
 def test_manifest_no_config_flow(manifest):
@@ -168,7 +168,7 @@ def test_panel_references_ws_commands(panel_js):
 
 def test_db_module_exports():
     sys.path.insert(0, os.path.dirname(__file__))
-    from custom_components.statistics_outlier_cleaner.db import (
+    from custom_components.recorder_toolkit.db import (
         apply_fix_sync,
         ensure_backup_table,
         fetch_stats_rows,
@@ -182,7 +182,7 @@ def test_db_module_exports():
 
 
 def test_outlier_module_exports():
-    from custom_components.statistics_outlier_cleaner.outlier import (
+    from custom_components.recorder_toolkit.outlier import (
         OutlierCandidate,
         OutlierReport,
         _algo_absolute,

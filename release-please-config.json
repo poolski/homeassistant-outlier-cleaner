@@ -8,7 +8,7 @@
       "extra-files": [
         {
           "type": "json",
-          "path": "custom_components/statistics_outlier_cleaner/manifest.json",
+          "path": "custom_components/recorder_toolkit/manifest.json",
           "jsonpath": "$.version"
         }
       ]

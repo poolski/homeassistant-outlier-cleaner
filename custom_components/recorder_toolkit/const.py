@@ -1,10 +1,10 @@
-"""Constants for the Statistics Outlier Cleaner integration."""
+"""Constants for the Recorder Toolkit integration."""
 
 from __future__ import annotations
 
 from typing import Final
 
-DOMAIN: Final = "statistics_outlier_cleaner"
+DOMAIN: Final = "recorder_toolkit"
 
 PANEL_URL_PATH: Final = "statistics-outlier-cleaner"
 PANEL_TITLE: Final = "Outlier Cleaner"

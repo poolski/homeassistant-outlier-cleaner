@@ -13,7 +13,7 @@ import pytest
 # conftest.py stubs HA modules; add the project root so the component is importable.
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent.parent))
 
-from custom_components.statistics_outlier_cleaner.outlier import (
+from custom_components.recorder_toolkit.outlier import (
     OutlierCandidate,
     _algo_absolute,
     _algo_mad,
