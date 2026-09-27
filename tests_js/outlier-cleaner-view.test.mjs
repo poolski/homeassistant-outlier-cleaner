@@ -19,9 +19,9 @@ const PANEL = join(
   dirname(fileURLToPath(import.meta.url)),
   "..",
   "custom_components",
-  "statistics_outlier_cleaner",
+  "recorder_toolkit",
   "frontend",
-  "statistics-outlier-cleaner-panel.js"
+  "outlier-cleaner-view.js"
 );
 
 let window;
@@ -35,7 +35,7 @@ before(() => {
   });
   window = dom.window;
   window.eval(readFileSync(PANEL, "utf8"));
-  PanelElement = window.customElements.get("statistics-outlier-cleaner-panel");
+  PanelElement = window.customElements.get("outlier-cleaner-view");
   assert.ok(PanelElement, "panel custom element should be registered on load");
 });
 

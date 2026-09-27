@@ -6,11 +6,11 @@ from typing import Final
 
 DOMAIN: Final = "recorder_toolkit"
 
-PANEL_URL_PATH: Final = "statistics-outlier-cleaner"
-PANEL_TITLE: Final = "Outlier Cleaner"
+PANEL_URL_PATH: Final = "recorder-toolkit"
+PANEL_TITLE: Final = "Recorder Toolkit"
 PANEL_ICON: Final = "mdi:chart-bell-curve-cumulative"
-PANEL_WEBCOMPONENT: Final = "statistics-outlier-cleaner-panel"
-PANEL_STATIC_PATH: Final = "/statistics_outlier_cleaner_static"
+PANEL_WEBCOMPONENT: Final = "recorder-toolkit-panel"
+PANEL_STATIC_PATH: Final = "/recorder_toolkit_static"
 
 # Service / action names
 SERVICE_CLEAN_OUTLIERS: Final = "clean_outliers"

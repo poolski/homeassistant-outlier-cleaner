@@ -41,7 +41,8 @@ REQUIRED_FILES = [
     "outlier.py",
     "services.yaml",
     "websocket.py",
-    "frontend/statistics-outlier-cleaner-panel.js",
+    "frontend/recorder-toolkit-panel.js",
+    "frontend/outlier-cleaner-view.js",
 ]
 
 
@@ -125,39 +126,45 @@ def test_restore_fix_has_fix_id_field(services):
 
 @pytest.fixture(scope="module")
 def panel_js() -> str:
-    with open(os.path.join(BASE, "frontend", "statistics-outlier-cleaner-panel.js")) as fh:
+    with open(os.path.join(BASE, "frontend", "recorder-toolkit-panel.js")) as fh:
+        return fh.read()
+
+
+@pytest.fixture(scope="module")
+def outlier_view_js() -> str:
+    with open(os.path.join(BASE, "frontend", "outlier-cleaner-view.js")) as fh:
         return fh.read()
 
 
 def test_panel_defines_custom_element(panel_js):
     assert "customElements.define" in panel_js
-    assert "statistics-outlier-cleaner-panel" in panel_js
+    assert "recorder-toolkit-panel" in panel_js
 
 
-def test_panel_class_name(panel_js):
-    assert "StatisticsOutlierCleanerPanel" in panel_js
+def test_panel_class_name(outlier_view_js):
+    assert "OutlierCleanerView" in outlier_view_js
 
 
-def test_panel_uses_ha_entity_picker(panel_js):
+def test_panel_uses_ha_entity_picker(outlier_view_js):
     # HA's own entity picker, with a plain text fallback. list_sum_statistics
     # still feeds the picker's allow-list.
-    assert "list_sum_statistics" in panel_js
-    assert "ha-entity-picker" in panel_js
-    assert "stat-input" in panel_js
-    assert "stat-dropdown" not in panel_js
+    assert "list_sum_statistics" in outlier_view_js
+    assert "ha-entity-picker" in outlier_view_js
+    assert "stat-input" in outlier_view_js
+    assert "stat-dropdown" not in outlier_view_js
 
 
-def test_panel_uses_ha_date_range_picker(panel_js):
+def test_panel_uses_ha_date_range_picker(outlier_view_js):
     # HA's own picker is the only date control; there is no fallback field of
     # ours to drift from it.
-    assert "ha-date-range-picker" in panel_js
-    assert 'type="date"' not in panel_js
-    assert "date-range-wrap" in panel_js
+    assert "ha-date-range-picker" in outlier_view_js
+    assert 'type="date"' not in outlier_view_js
+    assert "date-range-wrap" in outlier_view_js
 
 
-def test_panel_references_ws_commands(panel_js):
+def test_panel_references_ws_commands(outlier_view_js):
     for cmd in ("fetch_outliers", "apply_fix", "list_fixes", "restore_fix"):
-        assert cmd in panel_js, f"panel JS missing WS command reference '{cmd}'"
+        assert cmd in outlier_view_js, f"panel JS missing WS command reference '{cmd}'"
 
 
 

@@ -462,7 +462,7 @@ const STYLES = `
   code { font-family: monospace; background: var(--secondary-background-color, #f5f5f5); padding: 1px 4px; border-radius: 3px; font-size: 0.85em; }
 `;
 
-class StatisticsOutlierCleanerPanel extends HTMLElement {
+class OutlierCleanerView extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
@@ -1400,4 +1400,4 @@ class StatisticsOutlierCleanerPanel extends HTMLElement {
   _clearStatus() { this._q("scan-status").innerHTML = ""; }
 }
 
-customElements.define("statistics-outlier-cleaner-panel", StatisticsOutlierCleanerPanel);
+customElements.define("outlier-cleaner-view", OutlierCleanerView);
