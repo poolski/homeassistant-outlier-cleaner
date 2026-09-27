@@ -445,7 +445,7 @@ async def scan_outliers(
     else:
         raise ValueError(f"Unknown method: {method!r}")
 
-    flagged = sorted(flagged, key=lambda c: abs(c.change), reverse=True)
+    flagged = sorted(flagged, key=lambda c: c.start, reverse=True)
 
     return OutlierReport(
         statistic_id=statistic_id,
