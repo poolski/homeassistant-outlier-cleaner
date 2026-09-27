@@ -107,10 +107,25 @@ async def ws_generate_exclude_yaml(
     msg: dict[str, Any],
 ) -> None:
     """Generate a recorder exclude YAML block for the client's group selections."""
+    for selection in msg[ATTR_GROUP_SELECTIONS]:
+        if selection["keep"] not in selection["members"]:
+            connection.send_error(
+                msg["id"],
+                websocket_api.ERR_INVALID_FORMAT,
+                f"keep entity {selection['keep']!r} is not one of this group's members",
+            )
+            return
+
     exclude_groups = [
         [member for member in selection["members"] if member != selection["keep"]]
         for selection in msg[ATTR_GROUP_SELECTIONS]
     ]
+    # A group's own members (including the kept entity) may not currently
+    # have a state — e.g. temporarily unavailable — which would otherwise
+    # make them invisible to the glob safety check below and let a glob
+    # that also matches the kept entity slip through as "safe".
     all_known_entity_ids = set(hass.states.async_entity_ids())
+    for selection in msg[ATTR_GROUP_SELECTIONS]:
+        all_known_entity_ids.update(selection["members"])
     config = build_exclude_config(exclude_groups, all_known_entity_ids)
     connection.send_result(msg["id"], {"yaml": render_exclude_yaml(config)})

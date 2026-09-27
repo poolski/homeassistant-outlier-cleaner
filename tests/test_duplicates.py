@@ -17,6 +17,7 @@ from custom_components.recorder_toolkit.duplicates import (
     pick_correlation_column,
     rank_by_completeness,
     render_exclude_yaml,
+    series_diff,
 )
 
 
@@ -221,3 +222,51 @@ def test_render_exclude_yaml_includes_both_keys_when_present():
 
 def test_render_exclude_yaml_empty_config_returns_empty_string():
     assert render_exclude_yaml({}) == ""
+
+
+def test_series_diff_returns_consecutive_differences():
+    assert series_diff([1.0, 3.0, 6.0, 10.0]) == [2.0, 3.0, 4.0]
+
+
+def test_series_diff_short_series_returns_empty_list():
+    assert series_diff([5.0]) == []
+    assert series_diff([]) == []
+
+
+def test_pearson_correlation_on_raw_cumulative_sums_is_misleadingly_high():
+    # Two unrelated monotonically-increasing meters (e.g. a steady fridge vs a
+    # bursty EV charger) both trend upward, so their *raw* cumulative readings
+    # correlate almost perfectly even though the underlying usage doesn't.
+    steady = [float(i) for i in range(30)]
+    bursty = [0.0, 0.0, 0.0, 5.0, 5.0, 5.0, 5.0, 12.0, 12.0, 12.0] * 3
+    cumulative_bursty = []
+    total = 0.0
+    for v in bursty:
+        total += v
+        cumulative_bursty.append(total)
+    r = pearson_correlation(steady, cumulative_bursty)
+    assert r is not None
+    assert r > 0.9
+
+
+def test_pearson_correlation_on_diffed_sums_reveals_no_real_correlation():
+    # Both series' per-period increments vary (non-constant, so correlation
+    # is defined) but bear no relation to each other; their raw cumulative
+    # totals still trend upward together and would misleadingly correlate.
+    increments_a = [1.0, 2.0, 3.0, 4.0] * 8
+    increments_b = [4.0, 1.0, 4.0, 1.0] * 8
+    cumulative_a = []
+    cumulative_b = []
+    total_a = total_b = 0.0
+    for da, db in zip(increments_a, increments_b):
+        total_a += da
+        total_b += db
+        cumulative_a.append(total_a)
+        cumulative_b.append(total_b)
+    raw_r = pearson_correlation(cumulative_a, cumulative_b)
+    assert raw_r is not None
+    assert raw_r > 0.9  # the misleading result the cumulative totals give
+
+    diffed_r = pearson_correlation(series_diff(cumulative_a), series_diff(cumulative_b))
+    assert diffed_r is not None
+    assert diffed_r < 0.5  # the real (lack of) correlation, once diffed

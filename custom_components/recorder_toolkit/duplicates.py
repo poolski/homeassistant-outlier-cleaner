@@ -143,6 +143,18 @@ def pearson_correlation(xs: list[float], ys: list[float]) -> float | None:
     return (n * sum_xy - sum_x * sum_y) / denom
 
 
+def series_diff(values: list[float]) -> list[float]:
+    """Return consecutive differences: [values[1]-values[0], values[2]-values[1], ...].
+
+    Used to turn a cumulative/monotonic series (e.g. a sum-class sensor's raw
+    "state" reading) into per-period deltas before correlating — two
+    unrelated monotonically-increasing meters both trend upward and would
+    otherwise correlate almost perfectly on their raw cumulative values.
+    Returns an empty list for fewer than 2 input values.
+    """
+    return [b - a for a, b in zip(values, values[1:])]
+
+
 def group_duplicates(confirmed_pairs: list[tuple[str, str]]) -> list[list[str]]:
     """Group confirmed-duplicate pairs into connected components.
 
@@ -275,6 +287,16 @@ async def scan_duplicates(
     for meta in all_meta:
         if not (meta.get("has_mean") or meta.get("has_sum")):
             continue
+        # Duplicate detection is scoped to numeric `sensor` entities recorded
+        # by this HA instance's own recorder (Global Constraint). Statistics
+        # imported from other sources use a non-"sensor." statistic_id (e.g.
+        # "opower:elec_usage") that isn't a valid entity_id, so including
+        # them here would let generate_exclude_yaml emit an invalid
+        # `recorder: exclude: entities:` block.
+        if meta.get("source") != "recorder" or not meta["statistic_id"].startswith(
+            "sensor."
+        ):
+            continue
         name = meta.get("name")
         if not name:
             state = hass.states.get(meta["statistic_id"])
@@ -318,6 +340,12 @@ async def scan_duplicates(
         xs, ys = align_series(rows_a, rows_b, column)
         if len(xs) < min_overlap:
             continue
+        if column == "state":
+            # "state" is the sum-class fallback (a cumulative/monotonic
+            # reading): two unrelated ever-increasing meters both trend
+            # upward and would misleadingly correlate on raw values, so
+            # correlate per-period deltas instead.
+            xs, ys = series_diff(xs), series_diff(ys)
         r = pearson_correlation(xs, ys)
         if r is not None and r >= correlation_threshold:
             confirmed_pairs.append((a, b))
