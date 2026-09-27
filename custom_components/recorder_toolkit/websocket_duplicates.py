@@ -12,6 +12,7 @@ from homeassistant.core import HomeAssistant, callback
 
 from .const import (
     ATTR_CORRELATION_THRESHOLD,
+    ATTR_GROUP_SELECTIONS,
     ATTR_LOOKBACK_DAYS,
     ATTR_MIN_OVERLAP,
     ATTR_NAME_THRESHOLD,
@@ -19,9 +20,10 @@ from .const import (
     DEFAULT_DUPLICATE_LOOKBACK_DAYS,
     DEFAULT_MIN_OVERLAP_POINTS,
     DEFAULT_NAME_SIMILARITY_THRESHOLD,
+    WS_GENERATE_EXCLUDE_YAML,
     WS_LIST_DUPLICATE_CANDIDATES,
 )
-from .duplicates import scan_duplicates
+from .duplicates import build_exclude_config, render_exclude_yaml, scan_duplicates
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,6 +32,7 @@ _LOGGER = logging.getLogger(__name__)
 def async_register_duplicate_commands(hass: HomeAssistant) -> None:
     """Register duplicate-finder WebSocket commands."""
     websocket_api.async_register_command(hass, ws_list_duplicate_candidates)
+    websocket_api.async_register_command(hass, ws_generate_exclude_yaml)
 
 
 @websocket_api.websocket_command(
@@ -81,3 +84,33 @@ async def ws_list_duplicate_candidates(
             ]
         },
     )
+
+
+_GROUP_SELECTION_SCHEMA = vol.Schema(
+    {
+        vol.Required("members"): [str],
+        vol.Required("keep"): str,
+    }
+)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): WS_GENERATE_EXCLUDE_YAML,
+        vol.Required(ATTR_GROUP_SELECTIONS): [_GROUP_SELECTION_SCHEMA],
+    }
+)
+@websocket_api.async_response
+async def ws_generate_exclude_yaml(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Generate a recorder exclude YAML block for the client's group selections."""
+    exclude_groups = [
+        [member for member in selection["members"] if member != selection["keep"]]
+        for selection in msg[ATTR_GROUP_SELECTIONS]
+    ]
+    all_known_entity_ids = set(hass.states.async_entity_ids())
+    config = build_exclude_config(exclude_groups, all_known_entity_ids)
+    connection.send_result(msg["id"], {"yaml": render_exclude_yaml(config)})

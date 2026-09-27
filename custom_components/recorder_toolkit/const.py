@@ -36,6 +36,9 @@ WS_APPLY_FIX: Final = f"{DOMAIN}/apply_fix"
 WS_LIST_FIXES: Final = f"{DOMAIN}/list_fixes"
 WS_RESTORE_FIX: Final = f"{DOMAIN}/restore_fix"
 WS_LIST_DUPLICATE_CANDIDATES: Final = f"{DOMAIN}/list_duplicate_candidates"
+WS_GENERATE_EXCLUDE_YAML: Final = f"{DOMAIN}/generate_exclude_yaml"
+
+ATTR_GROUP_SELECTIONS: Final = "group_selections"
 
 ATTR_NAME_THRESHOLD: Final = "name_threshold"
 ATTR_CORRELATION_THRESHOLD: Final = "correlation_threshold"

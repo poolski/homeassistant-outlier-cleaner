@@ -10,7 +10,10 @@ from pytest_homeassistant_custom_component.components.recorder.common import (
     async_wait_recording_done,
 )
 
-from custom_components.recorder_toolkit.const import WS_LIST_DUPLICATE_CANDIDATES
+from custom_components.recorder_toolkit.const import (
+    WS_GENERATE_EXCLUDE_YAML,
+    WS_LIST_DUPLICATE_CANDIDATES,
+)
 from custom_components.recorder_toolkit.websocket_duplicates import (
     async_register_duplicate_commands,
 )
@@ -57,3 +60,42 @@ async def test_list_duplicate_candidates_returns_grouped_result(
     assert len(groups) == 1
     member_ids = [m["entity_id"] for m in groups[0]["members"]]
     assert member_ids == [STAT_A, STAT_B]
+
+
+async def test_generate_exclude_yaml_excludes_non_kept_members(
+    seeded_hass, hass_ws_client
+):
+    client = await hass_ws_client(seeded_hass)
+    await client.send_json(
+        {
+            "id": 2,
+            "type": WS_GENERATE_EXCLUDE_YAML,
+            "group_selections": [
+                {"members": [STAT_A, STAT_B], "keep": STAT_A},
+            ],
+        }
+    )
+    response = await client.receive_json()
+    assert response["success"]
+    assert STAT_B in response["result"]["yaml"]
+    assert STAT_A not in response["result"]["yaml"]
+
+
+async def test_generate_exclude_yaml_honours_user_override_of_suggested_keep(
+    seeded_hass, hass_ws_client
+):
+    client = await hass_ws_client(seeded_hass)
+    # User picked STAT_B to keep instead of the (unspecified-here) default.
+    await client.send_json(
+        {
+            "id": 3,
+            "type": WS_GENERATE_EXCLUDE_YAML,
+            "group_selections": [
+                {"members": [STAT_A, STAT_B], "keep": STAT_B},
+            ],
+        }
+    )
+    response = await client.receive_json()
+    assert response["success"]
+    assert STAT_A in response["result"]["yaml"]
+    assert STAT_B not in response["result"]["yaml"]
