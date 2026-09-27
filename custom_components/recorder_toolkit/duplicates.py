@@ -8,7 +8,9 @@ added in a later task.
 
 from __future__ import annotations
 
+import math
 import re
+from datetime import datetime
 from difflib import SequenceMatcher
 
 from .const import DEFAULT_NAME_SIMILARITY_THRESHOLD
@@ -59,3 +61,68 @@ def build_candidate_pairs(
                     )
                     pairs.add(pair)  # type: ignore[arg-type]
     return sorted(pairs)
+
+
+def _start_ms(row: dict) -> int:
+    """Normalise a row's `start` field to a millisecond epoch int."""
+    value = row["start"]
+    if isinstance(value, (int, float)):
+        return int(value * 1000) if value < 1e12 else int(value)
+    if isinstance(value, datetime):
+        return int(value.timestamp() * 1000)
+    raise TypeError(f"Unexpected start type: {type(value)!r}")
+
+
+def pick_correlation_column(rows_a: list[dict], rows_b: list[dict]) -> str | None:
+    """Return the value column both series actually populate.
+
+    Prefers "mean" (measurement-class sensors), falls back to "state"
+    (sum-class sensors' last raw value per period). Returns None if the two
+    series share no usable numeric column.
+    """
+    for column in ("mean", "state"):
+        if any(r.get(column) is not None for r in rows_a) and any(
+            r.get(column) is not None for r in rows_b
+        ):
+            return column
+    return None
+
+
+def align_series(
+    rows_a: list[dict], rows_b: list[dict], column: str
+) -> tuple[list[float], list[float]]:
+    """Inner-join two statistics series by start time, dropping null values."""
+    by_start_b = {
+        _start_ms(row): row[column] for row in rows_b if row.get(column) is not None
+    }
+    xs: list[float] = []
+    ys: list[float] = []
+    for row in rows_a:
+        value = row.get(column)
+        if value is None:
+            continue
+        match = by_start_b.get(_start_ms(row))
+        if match is not None:
+            xs.append(float(value))
+            ys.append(float(match))
+    return xs, ys
+
+
+def pearson_correlation(xs: list[float], ys: list[float]) -> float | None:
+    """Return the Pearson correlation coefficient, or None if undefined.
+
+    Undefined when there are fewer than 2 aligned points, or either series
+    has zero variance (a constant series can't be correlated).
+    """
+    n = len(xs)
+    if n != len(ys) or n < 2:
+        return None
+    sum_x = sum(xs)
+    sum_y = sum(ys)
+    sum_xy = sum(x * y for x, y in zip(xs, ys))
+    sum_x2 = sum(x * x for x in xs)
+    sum_y2 = sum(y * y for y in ys)
+    denom = math.sqrt((n * sum_x2 - sum_x**2) * (n * sum_y2 - sum_y**2))
+    if denom == 0:
+        return None
+    return (n * sum_xy - sum_x * sum_y) / denom
