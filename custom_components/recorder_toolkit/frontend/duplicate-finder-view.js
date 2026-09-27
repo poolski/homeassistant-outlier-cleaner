@@ -15,6 +15,8 @@ class DuplicateFinderView extends HTMLElement {
     this._groups = [];
     this._keepByGroup = {}; // groupIndex -> entity_id
     this._yaml = "";
+    this._scanning = false;
+    this._error = null;
     this._render();
   }
 
@@ -23,15 +25,25 @@ class DuplicateFinderView extends HTMLElement {
   }
 
   async _scan() {
-    const result = await this._send({ type: `${DOMAIN}/list_duplicate_candidates` });
-    this._groups = result.groups || [];
-    this._keepByGroup = {};
-    this._groups.forEach((group, index) => {
-      // Scan results are already ranked best-first; default to that suggestion.
-      this._keepByGroup[index] = group.members[0].entity_id;
-    });
-    this._yaml = "";
+    if (this._scanning) return;
+    this._scanning = true;
+    this._error = null;
     this._render();
+    try {
+      const result = await this._send({ type: `${DOMAIN}/list_duplicate_candidates` });
+      this._groups = result.groups || [];
+      this._keepByGroup = {};
+      this._groups.forEach((group, index) => {
+        // Scan results are already ranked best-first; default to that suggestion.
+        this._keepByGroup[index] = group.members[0].entity_id;
+      });
+      this._yaml = "";
+    } catch (err) {
+      this._error = err;
+    } finally {
+      this._scanning = false;
+      this._render();
+    }
   }
 
   async _generateYaml() {
@@ -39,11 +51,16 @@ class DuplicateFinderView extends HTMLElement {
       members: group.members.map((m) => m.entity_id),
       keep: this._keepByGroup[index],
     }));
-    const result = await this._send({
-      type: `${DOMAIN}/generate_exclude_yaml`,
-      group_selections,
-    });
-    this._yaml = result.yaml || "";
+    try {
+      const result = await this._send({
+        type: `${DOMAIN}/generate_exclude_yaml`,
+        group_selections,
+      });
+      this._yaml = result.yaml || "";
+      this._error = null;
+    } catch (err) {
+      this._error = err;
+    }
     this._render();
   }
 
@@ -59,8 +76,12 @@ class DuplicateFinderView extends HTMLElement {
         .group { border: 1px solid var(--divider-color, #ccc); border-radius: 4px; padding: 8px; margin-bottom: 8px; }
         .member { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
         #yaml-output { white-space: pre; background: var(--secondary-background-color, #f5f5f5); padding: 12px; border-radius: 4px; }
+        #scan-error { color: var(--error-color, #db4437); margin-bottom: 16px; }
       </style>
-      <button id="scan-button">Scan for duplicates</button>
+      <button id="scan-button" ${this._scanning ? "disabled" : ""}>
+        ${this._scanning ? "Scanning…" : "Scan for duplicates"}
+      </button>
+      ${this._error ? `<div id="scan-error">${this._error.message || this._error}</div>` : ""}
       <div id="groups">
         ${this._groups
           .map(

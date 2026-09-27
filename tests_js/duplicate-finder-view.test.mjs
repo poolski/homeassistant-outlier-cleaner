@@ -119,4 +119,40 @@ describe("duplicate-finder-view", () => {
     ]);
     window.document.body.removeChild(el);
   });
+
+  test("a rejected scan shows an error instead of an unhandled rejection", async () => {
+    const el = new ViewElement();
+    el._send = () => Promise.reject(new Error("boom"));
+    window.document.body.appendChild(el);
+    el.shadowRoot.getElementById("scan-button").click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const error = el.shadowRoot.getElementById("scan-error");
+    assert.ok(error, "an error element should be rendered");
+    assert.match(error.textContent, /boom/);
+    window.document.body.removeChild(el);
+  });
+
+  test("clicking scan again while one is in flight does not send a second request", async () => {
+    let sendCount = 0;
+    let resolveFirst;
+    const el = new ViewElement();
+    el._send = (msg) => {
+      if (msg.type.endsWith("list_duplicate_candidates")) {
+        sendCount += 1;
+        return new Promise((resolve) => {
+          resolveFirst = resolve;
+        });
+      }
+      return Promise.resolve({});
+    };
+    window.document.body.appendChild(el);
+    el.shadowRoot.getElementById("scan-button").click();
+    el.shadowRoot.getElementById("scan-button").click();
+    el.shadowRoot.getElementById("scan-button").click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(sendCount, 1);
+    resolveFirst({ groups: [] });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    window.document.body.removeChild(el);
+  });
 });
