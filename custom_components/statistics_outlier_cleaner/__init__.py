@@ -120,6 +120,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 threshold=threshold,
                 mad_factor=mad_factor,
                 lookback_days=lookback_days,
+                suggest_lookback_days=0,  # automation flow doesn't use auto-fix suggestions
             )
         except ValueError as exc:
             raise HomeAssistantError(str(exc)) from exc

@@ -24,6 +24,7 @@ ATTR_TOP_N: Final = "top_n"
 ATTR_THRESHOLD: Final = "threshold"
 ATTR_MAD_FACTOR: Final = "mad_factor"
 ATTR_LOOKBACK_DAYS: Final = "lookback_days"
+ATTR_SUGGEST_LOOKBACK_DAYS: Final = "suggest_lookback_days"
 ATTR_REPLACEMENT: Final = "replacement"
 ATTR_DRY_RUN: Final = "dry_run"
 ATTR_FIX_ID: Final = "fix_id"
@@ -39,6 +40,7 @@ WS_RESTORE_FIX: Final = f"{DOMAIN}/restore_fix"
 DEFAULT_TOP_N: Final = 10
 DEFAULT_MAD_FACTOR: Final = 6.0
 DEFAULT_LOOKBACK_DAYS: Final = 0  # 0 == no limit
+DEFAULT_AUTO_FIX_LOOKBACK_DAYS: Final = 7
 DEFAULT_REPLACEMENT: Final = 0.0
 DEFAULT_PERIOD: Final = "hybrid"
 DEFAULT_METHOD: Final = "top_n"

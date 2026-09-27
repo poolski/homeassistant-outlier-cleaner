@@ -47,6 +47,7 @@ class OutlierCandidate:
     change: float
     state: float | None
     period: str  # "hour" or "5minute"
+    suggested: float | None = None  # auto-fix suggestion, populated post-hoc
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -55,6 +56,7 @@ class OutlierCandidate:
             "change": self.change,
             "state": self.state,
             "period": self.period,
+            "suggested": self.suggested,
         }
 
 
@@ -330,6 +332,73 @@ def _median_sorted(sorted_values: list[float]) -> float:
     return (sorted_values[mid - 1] + sorted_values[mid]) / 2.0
 
 
+def _suggest_replacement(
+    candidate: OutlierCandidate,
+    pool: list[OutlierCandidate],
+    lookback_days: int,
+) -> float | None:
+    """Suggest a replacement ``change`` value for a flagged candidate.
+
+    Looks at ``pool`` (the sensor's raw history for the candidate's period)
+    for rows at the same time of day, within the period-appropriate tolerance
+    (see ``_TOD_TOLERANCE_MS``), over the ``lookback_days`` immediately
+    preceding the candidate — and returns their median ``change``.
+
+    Returns ``None`` when ``lookback_days`` is 0 or no matching history exists.
+    """
+    if lookback_days <= 0:
+        return None
+
+    tolerance = _TOD_TOLERANCE_MS.get(candidate.period, _HOUR_MS)
+    tod = candidate.start % _DAY_MS
+    window_start = candidate.start - lookback_days * _DAY_MS
+
+    matches: list[float] = []
+    for p in pool:
+        if p.period != candidate.period or p.start == candidate.start:
+            continue
+        if not (window_start <= p.start < candidate.start):
+            continue
+        diff = abs((p.start % _DAY_MS) - tod)
+        diff = min(diff, _DAY_MS - diff)  # midnight wrap-around
+        if diff <= tolerance:
+            matches.append(p.change)
+
+    if not matches:
+        return None
+    return _median_sorted(sorted(matches))
+
+
+async def _populate_suggestions(
+    hass: HomeAssistant,
+    statistic_id: str,
+    flagged: list[OutlierCandidate],
+    lookback_days: int,
+) -> None:
+    """Fetch trailing history and set ``suggested`` on each candidate in place."""
+    if lookback_days <= 0 or not flagged:
+        return
+
+    for period in ("hour", "5minute"):
+        period_candidates = [c for c in flagged if c.period == period]
+        if not period_candidates:
+            continue
+
+        earliest = min(c.start for c in period_candidates)
+        latest = max(c.start for c in period_candidates)
+        raw = await _fetch_period(
+            hass,
+            statistic_id,
+            period,
+            start_ts=(earliest - lookback_days * _DAY_MS) / 1000,
+            end_ts=latest / 1000,
+        )
+        pool = _normalise_rows(raw, period)
+
+        for c in period_candidates:
+            c.suggested = _suggest_replacement(c, pool, lookback_days)
+
+
 # ---------------------------------------------------------------------------
 # Hybrid period reconciliation (mirrors the dev-tools dialog)
 # ---------------------------------------------------------------------------
@@ -400,6 +469,7 @@ async def scan_outliers(
     lookback_days: int = 0,
     start_ts: float | None = None,
     end_ts: float | None = None,
+    suggest_lookback_days: int = 7,
 ) -> OutlierReport:
     """Run an outlier scan and return a report. No mutation."""
     # start_ts/end_ts take precedence; convert lookback_days as a fallback
@@ -446,6 +516,8 @@ async def scan_outliers(
         raise ValueError(f"Unknown method: {method!r}")
 
     flagged = sorted(flagged, key=lambda c: c.start, reverse=True)
+
+    await _populate_suggestions(hass, statistic_id, flagged, suggest_lookback_days)
 
     return OutlierReport(
         statistic_id=statistic_id,
