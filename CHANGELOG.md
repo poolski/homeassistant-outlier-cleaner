@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.2](https://github.com/poolski/homeassistant-outlier-cleaner/compare/v0.4.1...v0.4.2) (2026-09-27)
+
+
+### Bug Fixes
+
+* **outlier:** batch auto-fix for selected rows into one transaction set ([#16](https://github.com/poolski/homeassistant-outlier-cleaner/issues/16)) ([c4d03f1](https://github.com/poolski/homeassistant-outlier-cleaner/commit/c4d03f1313f10bd1bf5542eb4299d436612c9fcd))
+
 ## [0.4.1](https://github.com/poolski/homeassistant-outlier-cleaner/compare/v0.4.0...v0.4.1) (2026-09-27)
 
 
