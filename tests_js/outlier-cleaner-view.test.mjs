@@ -77,6 +77,25 @@ async function mountWithResults(opts) {
   return el;
 }
 
+describe("websocket commands use the recorder_toolkit domain", () => {
+  test("list_sum_statistics is sent under the current integration domain", async () => {
+    const seenTypes = [];
+    const el = new PanelElement();
+    el._send = (msg) => {
+      seenTypes.push(msg.type);
+      return Promise.resolve({ statistics: [] });
+    };
+    window.document.body.appendChild(el);
+    el.hass = { states: {} };
+    await settle();
+    assert.ok(
+      seenTypes.includes("recorder_toolkit/list_sum_statistics"),
+      `expected a recorder_toolkit/list_sum_statistics message, got: ${seenTypes.join(", ")}`
+    );
+    window.document.body.removeChild(el);
+  });
+});
+
 describe("scan results are not pre-selected", () => {
   let el;
   beforeEach(async () => {
@@ -140,7 +159,7 @@ describe("sidebar stays reachable when the sidebar is hidden", () => {
 
     assert.ok(btn, "a menu button should be present when narrow");
     assert.equal(btn.getAttribute("aria-label"), "Open sidebar");
-    assert.match(bar.textContent, /Statistics Outlier Cleaner/);
+    assert.match(bar.textContent, /Outlier Cleaner/);
   });
 
   test("clicking it fires hass-toggle-menu out of the shadow root", () => {

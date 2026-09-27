@@ -1,5 +1,5 @@
 #!/bin/bash
-# Prepare and launch Home Assistant with statistics_outlier_cleaner enabled.
+# Prepare and launch Home Assistant with recorder_toolkit enabled.
 #
 # The official image expects the onboarding wizard to create the first user.
 # These tests run unattended, so stand in for it: generate a config, add the
@@ -27,9 +27,9 @@ if [[ ! -f "${CONFIG_DIR}/.storage/onboarding" ]]; then
 EOF
 fi
 
-if ! grep -q '^statistics_outlier_cleaner:' "${CONFIG_FILE}"; then
-    echo "Enabling statistics_outlier_cleaner in configuration.yaml"
-    printf '\nstatistics_outlier_cleaner:\n' >> "${CONFIG_FILE}"
+if ! grep -q '^recorder_toolkit:' "${CONFIG_FILE}"; then
+    echo "Enabling recorder_toolkit in configuration.yaml"
+    printf '\nrecorder_toolkit:\n' >> "${CONFIG_FILE}"
 fi
 
 echo "Home Assistant version: $(hass --version)"

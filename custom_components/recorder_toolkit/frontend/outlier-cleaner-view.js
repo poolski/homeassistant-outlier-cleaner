@@ -1,5 +1,5 @@
 /**
- * Statistics Outlier Cleaner — sidebar panel
+ * Outlier Cleaner — Recorder Toolkit view
  *
  * Vanilla web component, no build step required.
  *
@@ -12,7 +12,7 @@
  * never completes.
  */
 
-const DOMAIN = "statistics_outlier_cleaner";
+const DOMAIN = "recorder_toolkit";
 
 // Any Lovelace card whose module imports ha-date-range-picker will do; the
 // energy date selection card is the shortest path to it.
@@ -550,6 +550,10 @@ class OutlierCleanerView extends HTMLElement {
   // Recent statistics (localStorage)
   // ---------------------------------------------------------------------------
 
+  // Key deliberately kept as "statistics_outlier_cleaner_recents" (not renamed
+  // to "recorder_toolkit_recents") across the domain rename, the same way
+  // db.py's _BACKUP_TABLE was kept: renaming it would silently drop every
+  // existing user's saved recents on upgrade for no benefit.
   _loadRecentStats() {
     try {
       return JSON.parse(localStorage.getItem("statistics_outlier_cleaner_recents") || "[]");
@@ -888,7 +892,7 @@ class OutlierCleanerView extends HTMLElement {
 
     const title = document.createElement("div");
     title.className = "app-title";
-    title.textContent = "Statistics Outlier Cleaner";
+    title.textContent = "Outlier Cleaner";
     bar.appendChild(title);
   }
 
