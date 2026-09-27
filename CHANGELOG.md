@@ -8,6 +8,17 @@
   `recorder_toolkit` to reflect the addition of duplicate-entity detection.
   Update your `configuration.yaml` key accordingly.
 
+## [1.0.0](https://github.com/poolski/homeassistant-outlier-cleaner/compare/v0.4.2...v1.0.0) (2026-09-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* **recorder_toolkit:** the configuration.yaml key, panel URL, and HACS repo listing all change to reflect the new recorder_toolkit domain. Update statistics_outlier_cleaner: to recorder_toolkit: in configuration.yaml.
+
+### Features
+
+* **recorder_toolkit:** rename from statistics_outlier_cleaner and add Duplicate Finder ([#18](https://github.com/poolski/homeassistant-outlier-cleaner/issues/18)) ([e794902](https://github.com/poolski/homeassistant-outlier-cleaner/commit/e7949023adb335c8b15b6fe690ab384e4a33c259))
+
 ## [0.4.2](https://github.com/poolski/homeassistant-outlier-cleaner/compare/v0.4.1...v0.4.2) (2026-09-27)
 
 
