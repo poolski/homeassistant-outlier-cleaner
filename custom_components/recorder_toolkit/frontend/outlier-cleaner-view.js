@@ -130,26 +130,19 @@ const WS = {
 };
 
 const STYLES = `
-  /* ha-panel-custom gives us display:block and safe-area padding but no height,
-     so height:100% here would resolve against an auto-height parent and
-     collapse. The document would scroll instead of us, and a sticky toolbar
-     would pin to that scrollport rather than the viewport. Take a definite
-     height from the viewport, less the insets the container already pads for. */
+  /* The shell owns the viewport height and the toolbar; this view fills the
+     shell's content area. min-height: 0 lets it shrink to that area so the
+     inner pane, not the document, scrolls. */
   :host {
-    --soc-toolbar-height: 56px;
     display: flex;
     flex-direction: column;
-    height: 100vh;
-    height: calc(
-      100dvh - var(--safe-area-inset-top, 0px) - var(--safe-area-inset-bottom, 0px)
-    );
+    flex: 1 1 auto;
+    min-height: 0;
     overflow: hidden;
     box-sizing: border-box;
     font-family: var(--paper-font-body1_-_font-family, inherit);
     color: var(--primary-text-color);
   }
-  /* The toolbar is a plain flex row pinned by layout rather than by
-     positioning, and only this pane scrolls. */
   .panel-content {
     flex: 1 1 auto;
     min-height: 0;
@@ -160,34 +153,6 @@ const STYLES = `
   }
   h2 { margin: 0 0 16px; font-size: 1.4rem; font-weight: 500; }
   h3 { margin: 0 0 12px; font-size: 1.1rem; font-weight: 500; }
-  /* A custom panel registered with embed_iframe: false owns the whole view —
-     Home Assistant renders no header of its own. Without a way to reach the
-     sidebar the panel is a dead end on mobile, where the sidebar is hidden.
-     Sticky so it stays reachable however far down the page you are. */
-  .app-toolbar {
-    flex: 0 0 auto;
-    z-index: 4;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    height: var(--soc-toolbar-height);
-    padding: 0 12px;
-    box-sizing: border-box;
-    background: var(--app-header-background-color, var(--primary-background-color, #fafafa));
-    color: var(--app-header-text-color, var(--primary-text-color));
-  }
-  .app-toolbar .app-title { font-size: 1.15rem; font-weight: 500; }
-  .menu-btn {
-    background: transparent;
-    color: inherit;
-    height: 40px;
-    width: 40px;
-    padding: 0;
-    flex: 0 0 auto;
-    justify-content: center;
-    border-radius: 50%;
-  }
-  .menu-btn:hover { background: rgba(var(--rgb-primary-text-color, 0,0,0), 0.08); }
   .card {
     background: var(--card-background-color, #fff);
     border-radius: 12px;
@@ -265,7 +230,7 @@ const STYLES = `
   .hidden { display: none !important; }
   table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
   th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--divider-color, #e0e0e0); }
-  /* .panel-content is the scrollport, so the toolbar is already excluded. */
+  /* .panel-content is the scrollport, so sticky headers pin to its top. */
   th { font-weight: 500; background: var(--secondary-background-color, #f5f5f5); position: sticky; top: 0; z-index: 1; }
   tr:hover td { background: rgba(var(--rgb-primary-color, 3,169,244), 0.05); }
   tr.selected td { background: rgba(var(--rgb-primary-color, 3,169,244), 0.1); }
@@ -309,7 +274,29 @@ const STYLES = `
     line-height: 1.6;
   }
   .method-help.warn { border-left-color: var(--warning-color, #f59e0b); }
-  .mh-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+  .mh-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    flex-wrap: wrap;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+  }
+  .mh-header::-webkit-details-marker { display: none; }
+  /* display: flex drops the native disclosure marker, so draw our own. */
+  .mh-header::before {
+    content: "";
+    width: 0;
+    height: 0;
+    border-style: solid;
+    border-width: 5px 0 5px 7px;
+    border-color: transparent transparent transparent currentColor;
+    transition: transform 0.15s;
+  }
+  .method-help[open] > .mh-header::before { transform: rotate(90deg); }
+  .method-help:not([open]) > .mh-header { margin-bottom: 0; }
   .mh-title { font-size: 0.875rem; font-weight: 600; }
   .mh-summary { margin: 0 0 0; color: var(--primary-text-color); }
   .mh-warning {
@@ -470,6 +457,7 @@ class OutlierCleanerView extends HTMLElement {
     this._candidates = [];
     this._selected = new Set();
     this._msgId = 1;
+    this._methodHelpOpen = false;
     // Single source of truth for the scan range. Seeded so a scan works even
     // before HA's picker has finished loading.
     this._startDate = startOfLocalDay(-DEFAULT_RANGE_DAYS);
@@ -483,7 +471,6 @@ class OutlierCleanerView extends HTMLElement {
     this._statId = null;
     this._allStats = [];      // full list from WS, used for the picker allow-list
     this._recentStats = this._loadRecentStats();
-    this._narrow = undefined;   // set by HA; undefined means "not told yet"
   }
 
   set hass(hass) {
@@ -502,18 +489,6 @@ class OutlierCleanerView extends HTMLElement {
     // there is nothing to forward once they are mounted.
     if (!this._pickerMounted) this._setupDateRangePicker();
     if (!this._entityPickerMounted) this._setupEntityPicker();
-  }
-
-  // HA sets this on custom panels and updates it as the viewport changes. It is
-  // what tells us the sidebar is hidden and the menu button is the only way out.
-  set narrow(value) {
-    if (this._narrow === value) return;
-    this._narrow = value;
-    if (this.shadowRoot.getElementById("app-toolbar")) this._renderToolbar();
-  }
-
-  get narrow() {
-    return this._narrow;
   }
 
   // ---------------------------------------------------------------------------
@@ -769,8 +744,6 @@ class OutlierCleanerView extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>${STYLES}</style>
 
-      <div class="app-toolbar" id="app-toolbar"></div>
-
       <div class="panel-content" id="panel-content">
       <div class="card">
         <h3>Scan</h3>
@@ -796,6 +769,10 @@ class OutlierCleanerView extends HTMLElement {
           <div class="form-group" id="opt-mad">
             <label>MAD factor</label>
             <input type="number" id="mad-factor" value="6" min="1" max="50" step="0.5">
+          </div>
+          <div class="form-group" id="opt-baseline">
+            <label>Baseline (days)</label>
+            <input type="number" id="baseline-days" value="14" min="0" step="1">
           </div>
           <div class="form-group hidden" id="opt-absolute">
             <label>Threshold</label>
@@ -861,47 +838,8 @@ class OutlierCleanerView extends HTMLElement {
       </div>
     `;
 
-    this._renderToolbar();
     this._renderRecents();
     this._wireEvents();
-  }
-
-  _renderToolbar() {
-    const bar = this._q("app-toolbar");
-    if (!bar) return;
-    bar.innerHTML = "";
-
-    // Only needed when the sidebar is hidden. `narrow` is set by HA (see
-    // setCustomPanelProperties in ha-panel-custom). Undefined means it hasn't
-    // told us yet, so show the button rather than risk a dead end.
-    if (this._narrow !== false) {
-      // We own this button rather than reusing HA's `ha-menu-button`: that
-      // element resolves `narrow` and `ui` through @lit/context and may not be
-      // defined at the moment we render, so depending on it is a race. Firing
-      // the event directly is what ha-menu-button itself does on click.
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "menu-btn";
-      btn.setAttribute("aria-label", "Open sidebar");
-      btn.innerHTML =
-        `<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">` +
-        `<path fill="currentColor" d="M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16Z"/></svg>`;
-      btn.addEventListener("click", () => this._toggleSidebar());
-      bar.appendChild(btn);
-    }
-
-    const title = document.createElement("div");
-    title.className = "app-title";
-    title.textContent = "Outlier Cleaner";
-    bar.appendChild(title);
-  }
-
-  _toggleSidebar() {
-    // HA listens for this on the way up from the panel. bubbles + composed match
-    // fireEvent's defaults so it escapes our shadow root and reaches the app.
-    this.dispatchEvent(
-      new CustomEvent("hass-toggle-menu", { bubbles: true, composed: true })
-    );
   }
 
   _wireEvents() {
@@ -938,6 +876,7 @@ class OutlierCleanerView extends HTMLElement {
   _updateMethodOptions() {
     const m = this._getMethod();
     this._q("opt-mad").classList.toggle("hidden", m !== "mad");
+    this._q("opt-baseline").classList.toggle("hidden", m !== "mad");
     this._q("opt-absolute").classList.toggle("hidden", m !== "absolute");
     this._q("opt-top-n").classList.toggle("hidden", m !== "top_n");
     this._renderMethodHelp(m);
@@ -979,11 +918,11 @@ class OutlierCleanerView extends HTMLElement {
     ).join("");
 
     this._q("method-help").innerHTML = `
-      <div class="method-help ${h.safe ? "" : "warn"}">
-        <div class="mh-header">
+      <details class="method-help ${h.safe ? "" : "warn"}" ${this._methodHelpOpen ? "open" : ""}>
+        <summary class="mh-header">
           <span class="mh-title">${h.title}</span>
           ${safeBadge}
-        </div>
+        </summary>
         <p class="mh-summary">${h.summary}</p>
         ${warningHtml}
         <div class="mh-section">
@@ -1000,7 +939,10 @@ class OutlierCleanerView extends HTMLElement {
           <summary>Technical formula</summary>
           <code class="mh-formula-code">${h.formula}</code>
         </details>
-      </div>`;
+      </details>`;
+
+    const details = this._q("method-help").querySelector(".method-help");
+    details.addEventListener("toggle", () => { this._methodHelpOpen = details.open; });
   }
 
   // ---------------------------------------------------------------------------
@@ -1033,7 +975,13 @@ class OutlierCleanerView extends HTMLElement {
     if (this._startDate) params.start_ts = this._startDate.getTime() / 1000;
     if (this._endDate) params.end_ts = this._endDate.getTime() / 1000;
 
-    if (method === "mad")      params.mad_factor = parseFloat(this._q("mad-factor").value) || 6;
+    if (method === "mad") {
+      params.mad_factor = parseFloat(this._q("mad-factor").value) || 6;
+      // 0 is meaningful (compare within the scanned range only), so only an
+      // empty or garbled field falls back to the default.
+      const baselineDays = parseInt(this._q("baseline-days").value);
+      params.baseline_days = Number.isNaN(baselineDays) ? 14 : baselineDays;
+    }
     if (method === "absolute") params.threshold  = parseFloat(this._q("threshold").value) || 0;
     if (method === "top_n")    params.top_n      = parseInt(this._q("top-n").value) || 10;
     params.suggest_lookback_days = parseInt(this._q("auto-lookback-days").value) || 0;

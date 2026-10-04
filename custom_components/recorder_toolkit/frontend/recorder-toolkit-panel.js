@@ -17,6 +17,85 @@ const TABS = [
   { id: "duplicates", label: "Duplicate Finder", tag: "duplicate-finder-view", module: "./duplicate-finder-view.js" },
 ];
 
+const STYLES = `
+  /* ha-panel-custom gives us display:block and safe-area padding but no height,
+     so height:100% here would resolve against an auto-height parent and
+     collapse. The document would scroll instead of us, and a sticky toolbar
+     would pin to that scrollport rather than the viewport. Take a definite
+     height from the viewport, less the insets the container already pads for. */
+  :host {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: calc(
+      100dvh - var(--safe-area-inset-top, 0px) - var(--safe-area-inset-bottom, 0px)
+    );
+    overflow: hidden;
+    box-sizing: border-box;
+    font-family: var(--paper-font-body1_-_font-family, inherit);
+    color: var(--primary-text-color);
+  }
+  /* A custom panel registered with embed_iframe: false owns the whole view —
+     Home Assistant renders no header of its own. Without a way to reach the
+     sidebar the panel is a dead end on mobile, where the sidebar is hidden.
+     Pinned by layout: toolbar and tabs are fixed rows, only #content scrolls. */
+  .app-toolbar {
+    flex: 0 0 auto;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 56px;
+    padding: 0 12px;
+    box-sizing: border-box;
+    background: var(--app-header-background-color, var(--primary-background-color, #fafafa));
+    color: var(--app-header-text-color, var(--primary-text-color));
+  }
+  .app-toolbar .app-title { font-size: 1.15rem; font-weight: 500; }
+  .menu-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    color: inherit;
+    border: none;
+    cursor: pointer;
+    height: 40px;
+    width: 40px;
+    padding: 0;
+    flex: 0 0 auto;
+    border-radius: 50%;
+  }
+  .menu-btn:hover { background: rgba(var(--rgb-primary-text-color, 0,0,0), 0.08); }
+  [role="tablist"] {
+    flex: 0 0 auto;
+    display: flex;
+    gap: 8px;
+    padding: 0 16px;
+    overflow-x: auto;
+    border-bottom: 1px solid var(--divider-color, #ccc);
+  }
+  [role="tab"] {
+    background: none;
+    border: none;
+    padding: 8px 16px;
+    cursor: pointer;
+    font-size: 14px;
+    color: inherit;
+    white-space: nowrap;
+  }
+  [role="tab"][aria-selected="true"] { border-bottom: 2px solid var(--primary-color, #03a9f4); font-weight: 600; }
+  /* A view may own its scrolling (min-height: 0 plus an inner pane) or let
+     this pane scroll it. */
+  #content {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+`;
+
 class RecorderToolkitPanel extends HTMLElement {
   constructor() {
     super();
@@ -24,7 +103,7 @@ class RecorderToolkitPanel extends HTMLElement {
     this._activeTabId = TABS[0].id;
     this._mountedViews = {};
     this._hass = null;
-    this._narrow = false;
+    this._narrow = undefined; // set by HA; undefined means "not told yet"
   }
 
   set hass(value) {
@@ -37,7 +116,9 @@ class RecorderToolkitPanel extends HTMLElement {
   }
 
   set narrow(value) {
+    if (this._narrow === value) return;
     this._narrow = value;
+    this._renderToolbar();
     for (const view of Object.values(this._mountedViews)) view.narrow = value;
   }
 
@@ -51,13 +132,8 @@ class RecorderToolkitPanel extends HTMLElement {
 
   _render() {
     this.shadowRoot.innerHTML = `
-      <style>
-        :host { display: block; padding: 16px; }
-        [role="tablist"] { display: flex; gap: 8px; border-bottom: 1px solid var(--divider-color, #ccc); margin-bottom: 16px; }
-        [role="tab"] { background: none; border: none; padding: 8px 16px; cursor: pointer; font-size: 14px; }
-        [role="tab"][aria-selected="true"] { border-bottom: 2px solid var(--primary-color, #03a9f4); font-weight: 600; }
-        #content { min-height: 200px; }
-      </style>
+      <style>${STYLES}</style>
+      <div class="app-toolbar" id="app-toolbar"></div>
       <div role="tablist">
         ${TABS.map(
           (tab) => `<button role="tab" aria-selected="${tab.id === this._activeTabId}" data-tab-id="${tab.id}">${tab.label}</button>`
@@ -68,7 +144,42 @@ class RecorderToolkitPanel extends HTMLElement {
     for (const button of this.shadowRoot.querySelectorAll("[role='tab']")) {
       button.addEventListener("click", () => this._selectTab(button.dataset.tabId));
     }
+    this._renderToolbar();
     this._mountActiveTab();
+  }
+
+  _renderToolbar() {
+    const bar = this.shadowRoot.getElementById("app-toolbar");
+    if (!bar) return;
+    bar.innerHTML = "";
+
+    // Only needed when the sidebar is hidden. `narrow` is set by HA (see
+    // setCustomPanelProperties in ha-panel-custom). Undefined means it hasn't
+    // told us yet, so show the button rather than risk a dead end.
+    if (this._narrow !== false) {
+      // We own this button rather than reusing HA's `ha-menu-button`: that
+      // element resolves `narrow` and `ui` through @lit/context and may not be
+      // defined at the moment we render, so depending on it is a race. Firing
+      // the event directly is what ha-menu-button itself does on click.
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "menu-btn";
+      btn.setAttribute("aria-label", "Open sidebar");
+      btn.innerHTML =
+        `<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">` +
+        `<path fill="currentColor" d="M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16Z"/></svg>`;
+      // bubbles + composed match fireEvent's defaults so the event escapes our
+      // shadow root and reaches HA's app shell.
+      btn.addEventListener("click", () =>
+        this.dispatchEvent(new CustomEvent("hass-toggle-menu", { bubbles: true, composed: true }))
+      );
+      bar.appendChild(btn);
+    }
+
+    const title = document.createElement("div");
+    title.className = "app-title";
+    title.textContent = "Recorder Toolkit";
+    bar.appendChild(title);
   }
 
   _selectTab(tabId) {

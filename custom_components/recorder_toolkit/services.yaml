@@ -74,6 +74,17 @@ clean_outliers:
         number:
           min: 0
           mode: box
+    baseline_days:
+      name: Baseline days
+      description: >
+        MAD only. Days of history before the scanned range to compare
+        against, so short ranges still have same-time-of-day peers.
+        0 compares within the scanned range only.
+      default: 14
+      selector:
+        number:
+          min: 0
+          mode: box
     replacement:
       name: Replacement change
       description: >

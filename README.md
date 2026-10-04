@@ -86,6 +86,7 @@ data:
   mad_factor: 6        # higher = more conservative
   period: hybrid       # hybrid | hour | 5minute
   lookback_days: 30    # 0 = all time
+  baseline_days: 14    # mad only: prior history to compare against
   replacement: 0       # set flagged change to this value
   dry_run: false
 ```
@@ -140,6 +141,8 @@ Three methods are available. Two are safe to use in automations; one is manual-o
 **How it works:** Computes the [modified z-score](https://www.itl.nist.gov/div898/handbook/eda/section3/eda35h.htm) for every row's `change` value. Rows whose score exceeds `mad_factor` are flagged.
 
 Rather than comparing against one global median, each row is judged against **rows at the same time of day** (±5 min for hourly, ±30 s for 5-minute). This matters for sensors with a daily rhythm: 18:00 on a Tuesday is compared with 18:00 on other days, not with 03:00. The row being tested is excluded from its own baseline, so a large spike cannot drag the median toward itself and mask its own detection.
+
+Peers also come from the **`baseline_days`** (default `14`) before the scanned range. Those rows are only compared against and are never flagged. Without them a range shorter than a day would have nothing to compare against, because each time slot appears in it only once. Set `0` to compare within the scanned range only. Home Assistant keeps 5-minute statistics for `purge_keep_days` (10 by default), so the 5-minute part of the baseline is capped at that.
 
 **Key property:** MAD does not flag normal variation — on clean data it returns nothing, which is what makes it safe for scheduled automations. When a sensor's baseline is genuinely flat (a solar panel's night hours are all exactly `0.0`), there is no spread to compute a z-score from; such rows are instead flagged only if they exceed the sensor's normal operating magnitude by more than 100×. That keeps flat-baseline sensors from producing false positives while still catching the impossible values a restart spike produces.
 

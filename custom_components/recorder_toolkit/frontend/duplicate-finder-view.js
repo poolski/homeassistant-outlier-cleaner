@@ -161,7 +161,7 @@ class DuplicateFinderView extends HTMLElement {
   _render() {
     this.shadowRoot.innerHTML = `
       <style>
-        :host { display: block; }
+        :host { display: block; padding: 16px; }
         button { margin-bottom: 16px; }
         .group { border: 1px solid var(--divider-color, #ccc); border-radius: 4px; padding: 8px; margin-bottom: 8px; }
         .subgroup { padding: 4px 0; }
