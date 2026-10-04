@@ -17,6 +17,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.typing import ConfigType
 
 from .const import (
+    ATTR_BASELINE_DAYS,
     ATTR_DRY_RUN,
     ATTR_FIX_ID,
     ATTR_LOOKBACK_DAYS,
@@ -27,6 +28,7 @@ from .const import (
     ATTR_STATISTIC_ID,
     ATTR_THRESHOLD,
     ATTR_TOP_N,
+    DEFAULT_BASELINE_DAYS,
     DEFAULT_LOOKBACK_DAYS,
     DEFAULT_MAD_FACTOR,
     DEFAULT_METHOD,
@@ -107,6 +109,7 @@ def _register_services(hass: HomeAssistant) -> None:
         threshold: float = call.data.get(ATTR_THRESHOLD, 0.0)
         mad_factor: float = call.data.get(ATTR_MAD_FACTOR, DEFAULT_MAD_FACTOR)
         lookback_days: int = call.data.get(ATTR_LOOKBACK_DAYS, DEFAULT_LOOKBACK_DAYS)
+        baseline_days: int = call.data.get(ATTR_BASELINE_DAYS, DEFAULT_BASELINE_DAYS)
         replacement: float = call.data.get(ATTR_REPLACEMENT, DEFAULT_REPLACEMENT)
         dry_run: bool = call.data.get(ATTR_DRY_RUN, False)
 
@@ -121,6 +124,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 mad_factor=mad_factor,
                 lookback_days=lookback_days,
                 suggest_lookback_days=0,  # automation flow doesn't use auto-fix suggestions
+                baseline_days=baseline_days,
             )
         except ValueError as exc:
             raise HomeAssistantError(str(exc)) from exc

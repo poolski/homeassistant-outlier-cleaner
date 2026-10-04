@@ -16,6 +16,7 @@ from homeassistant.core import HomeAssistant, callback
 
 from .const import (
     DEFAULT_AUTO_FIX_LOOKBACK_DAYS,
+    DEFAULT_BASELINE_DAYS,
     DEFAULT_LOOKBACK_DAYS,
     DEFAULT_MAD_FACTOR,
     DEFAULT_METHOD,
@@ -99,6 +100,9 @@ async def ws_list_sum_statistics(
         vol.Optional(
             "suggest_lookback_days", default=DEFAULT_AUTO_FIX_LOOKBACK_DAYS
         ): vol.All(int, vol.Range(min=0)),
+        vol.Optional("baseline_days", default=DEFAULT_BASELINE_DAYS): vol.All(
+            int, vol.Range(min=0)
+        ),
     }
 )
 @websocket_api.async_response
@@ -121,6 +125,7 @@ async def ws_fetch_outliers(
             start_ts=msg.get("start_ts"),
             end_ts=msg.get("end_ts"),
             suggest_lookback_days=msg["suggest_lookback_days"],
+            baseline_days=msg["baseline_days"],
         )
     except ValueError as exc:
         connection.send_error(msg["id"], websocket_api.ERR_INVALID_FORMAT, str(exc))

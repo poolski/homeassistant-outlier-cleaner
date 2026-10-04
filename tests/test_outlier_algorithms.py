@@ -435,6 +435,42 @@ class TestAlgoMad:
         assert mad is None  # no single global baseline
 
 
+class TestAlgoMadBaseline:
+    """A short scan range has no same-time-of-day peers of its own; the
+    trailing ``baseline`` history supplies them."""
+
+    def test_sub_day_scan_flags_spike_against_baseline(self):
+        # Scan covers 6 hours of day 14; each slot appears once, so on its own
+        # nothing has a peer. 14 prior days provide the comparison.
+        baseline = [r for h in range(24) for r in _multiday_hour(14, hour_of_day=h)]
+        scan = [_hour(14 * _DAY_MS + h * _HOUR_MS, 1.0) for h in range(6, 12)]
+        spike = _hour(14 * _DAY_MS + 12 * _HOUR_MS, 500.0)
+        flagged, _, _ = _algo_mad(scan + [spike], mad_factor=6.0, baseline=baseline)
+        assert flagged == [spike]
+
+    def test_baseline_rows_are_never_flagged(self):
+        # A spike inside the baseline is history to compare against, not a
+        # result: only rows in the scan range can be reported.
+        baseline = _multiday_hour(14, hour_of_day=10)
+        baseline.append(_hour(14 * _DAY_MS + 10 * _HOUR_MS, 900.0))
+        scan = [_hour(15 * _DAY_MS + 10 * _HOUR_MS, 1.0)]
+        flagged, _, _ = _algo_mad(scan, mad_factor=6.0, baseline=baseline)
+        assert flagged == []
+
+    def test_baseline_with_spike_does_not_hide_scan_spike(self):
+        baseline = _multiday_hour(14, hour_of_day=10)
+        baseline.append(_hour(3 * _DAY_MS + 10 * _HOUR_MS, 700.0))
+        spike = _hour(15 * _DAY_MS + 10 * _HOUR_MS, 500.0)
+        flagged, _, _ = _algo_mad([spike], mad_factor=6.0, baseline=baseline)
+        assert flagged == [spike]
+
+    def test_no_baseline_matches_previous_behaviour(self):
+        scan = [_hour(14 * _DAY_MS + h * _HOUR_MS, 1.0) for h in range(6)]
+        scan.append(_hour(14 * _DAY_MS + 6 * _HOUR_MS, 500.0))
+        flagged, _, _ = _algo_mad(scan, mad_factor=6.0, baseline=[])
+        assert flagged == []
+
+
 # ---------------------------------------------------------------------------
 # _algo_mad — hybrid per-period isolation
 # ---------------------------------------------------------------------------

@@ -230,12 +230,15 @@ _DEGENERATE_MAD_RATIO = 100.0
 
 
 def _algo_mad(
-    candidates: list[OutlierCandidate], mad_factor: float
+    candidates: list[OutlierCandidate],
+    mad_factor: float,
+    baseline: list[OutlierCandidate] | None = None,
 ) -> tuple[list[OutlierCandidate], float | None, float | None]:
     """MAD with time-of-day peer grouping.
 
-    Each candidate is judged against all other candidates that fall at the
-    same time of day, within the period-appropriate tolerance:
+    Each candidate is judged against all other rows — in ``candidates`` and in
+    ``baseline`` — that fall at the same time of day, within the
+    period-appropriate tolerance:
       * ``"5minute"`` period: ±30 s
       * ``"hour"`` period:   ±5 min
 
@@ -252,21 +255,27 @@ def _algo_mad(
     Complexity: O(N × D) where D = distinct time-of-day buckets (≤24 for hourly,
     ≤288 for 5-minute). For 8 000 rows × 24 buckets ≈ 192 000 ops vs 64 M for O(N²).
 
+    ``baseline`` is history from before the scan range. Its rows are peers
+    only and are never flagged. Without it a range shorter than a day has no
+    peers at all, since each time-of-day slot appears in it once.
+
     Returns ``(flagged, None, None)`` — no single global baseline exists.
     """
     if not candidates:
         return [], None, None
 
+    pool = candidates + (baseline or [])
+
     # Fallback scale for the degenerate-MAD path when the local peer median is
     # itself ~0 (e.g. a solar sensor's night hours are all exactly 0.0). The
-    # median of non-zero |change| across the whole scan describes the sensor's
+    # median of non-zero |change| across the whole pool describes the sensor's
     # normal operating magnitude and is robust to a handful of spikes.
-    nonzero_changes = sorted(abs(c.change) for c in candidates if c.change != 0)
+    nonzero_changes = sorted(abs(c.change) for c in pool if c.change != 0)
     global_scale = _median_sorted(nonzero_changes)
 
     # Pre-group by exact time-of-day ms for O(log D) range lookup per candidate.
     tod_groups: dict[int, list[OutlierCandidate]] = {}
-    for c in candidates:
+    for c in pool:
         key = c.start % _DAY_MS
         tod_groups.setdefault(key, []).append(c)
     tod_keys = sorted(tod_groups)
@@ -457,6 +466,29 @@ def _hybrid_rows(
 # ---------------------------------------------------------------------------
 
 
+async def _fetch_candidates(
+    hass: HomeAssistant,
+    statistic_id: str,
+    period: Period,
+    start_ts: float | None,
+    end_ts: float | None,
+) -> list[OutlierCandidate]:
+    """Fetch and normalise rows for ``period``, reconciling hybrid ones."""
+    if period == "hour":
+        raw = await _fetch_period(hass, statistic_id, "hour", start_ts=start_ts, end_ts=end_ts)
+        return _normalise_rows(raw, "hour")
+    if period == "5minute":
+        raw = await _fetch_period(hass, statistic_id, "5minute", start_ts=start_ts, end_ts=end_ts)
+        rows = _normalise_rows(raw, "5minute")
+        return rows[1:] if rows else []
+    hour_raw = await _fetch_period(hass, statistic_id, "hour", start_ts=start_ts, end_ts=end_ts)
+    five_raw = await _fetch_period(hass, statistic_id, "5minute", start_ts=start_ts, end_ts=end_ts)
+    return _hybrid_rows(
+        _normalise_rows(hour_raw, "hour"),
+        _normalise_rows(five_raw, "5minute"),
+    )
+
+
 async def scan_outliers(
     hass: HomeAssistant,
     statistic_id: str,
@@ -470,26 +502,31 @@ async def scan_outliers(
     start_ts: float | None = None,
     end_ts: float | None = None,
     suggest_lookback_days: int = 7,
+    baseline_days: int = 14,
 ) -> OutlierReport:
-    """Run an outlier scan and return a report. No mutation."""
+    """Run an outlier scan and return a report. No mutation.
+
+    For the MAD method, ``baseline_days`` of history before the scan range are
+    fetched as extra time-of-day peers (see ``_algo_mad``). Ignored when the
+    scan has no start, since it then already covers all history.
+    """
     # start_ts/end_ts take precedence; convert lookback_days as a fallback
     if start_ts is None and lookback_days > 0:
         start_ts = (dt_util.utcnow() - timedelta(days=lookback_days)).timestamp()
 
-    if period == "hour":
-        raw = await _fetch_period(hass, statistic_id, "hour", start_ts=start_ts, end_ts=end_ts)
-        candidates = _normalise_rows(raw, "hour")
-    elif period == "5minute":
-        raw = await _fetch_period(hass, statistic_id, "5minute", start_ts=start_ts, end_ts=end_ts)
-        rows = _normalise_rows(raw, "5minute")
-        candidates = rows[1:] if rows else []
-    else:  # hybrid
-        hour_raw = await _fetch_period(hass, statistic_id, "hour", start_ts=start_ts, end_ts=end_ts)
-        five_raw = await _fetch_period(hass, statistic_id, "5minute", start_ts=start_ts, end_ts=end_ts)
-        candidates = _hybrid_rows(
-            _normalise_rows(hour_raw, "hour"),
-            _normalise_rows(five_raw, "5minute"),
+    candidates = await _fetch_candidates(hass, statistic_id, period, start_ts, end_ts)
+
+    baseline: list[OutlierCandidate] = []
+    if method == "mad" and baseline_days > 0 and start_ts is not None:
+        rows = await _fetch_candidates(
+            hass,
+            statistic_id,
+            period,
+            start_ts - baseline_days * 86_400,
+            start_ts,
         )
+        scan_start_ms = int(start_ts * 1000)
+        baseline = [r for r in rows if r.start < scan_start_ms]
 
     scanned = len(candidates)
     median: float | None = None
@@ -507,11 +544,13 @@ async def scan_outliers(
             # (hourly changes ~12× larger than 5-minute changes).
             hour_cands = [c for c in candidates if c.period == "hour"]
             fivemin_cands = [c for c in candidates if c.period == "5minute"]
-            h_flagged, _, _ = _algo_mad(hour_cands, mad_factor)
-            f_flagged, _, _ = _algo_mad(fivemin_cands, mad_factor)
+            h_baseline = [c for c in baseline if c.period == "hour"]
+            f_baseline = [c for c in baseline if c.period == "5minute"]
+            h_flagged, _, _ = _algo_mad(hour_cands, mad_factor, h_baseline)
+            f_flagged, _, _ = _algo_mad(fivemin_cands, mad_factor, f_baseline)
             flagged = h_flagged + f_flagged
         else:
-            flagged, median, mad = _algo_mad(candidates, mad_factor)
+            flagged, median, mad = _algo_mad(candidates, mad_factor, baseline)
     else:
         raise ValueError(f"Unknown method: {method!r}")
 

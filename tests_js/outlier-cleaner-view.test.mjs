@@ -148,71 +148,15 @@ describe("scan results are not pre-selected", () => {
   });
 });
 
-describe("sidebar stays reachable when the sidebar is hidden", () => {
-  // A custom panel with embed_iframe: false owns the whole view and HA renders
-  // no header, so without this the panel is a dead end on mobile.
+describe("the view fills the shell's content area", () => {
+  // The toolbar and the full-height layout belong to the shell, which stacks
+  // toolbar -> tabs -> view. The view must not claim the viewport itself, or
+  // it pushes the shell's toolbar off-screen.
 
-  test("narrow renders a labelled menu button and the title", () => {
+  test("no toolbar of its own", () => {
     const el = mount({ narrow: true });
-    const bar = $(el, "app-toolbar");
-    const btn = bar.querySelector(".menu-btn");
-
-    assert.ok(btn, "a menu button should be present when narrow");
-    assert.equal(btn.getAttribute("aria-label"), "Open sidebar");
-    assert.match(bar.textContent, /Outlier Cleaner/);
-  });
-
-  test("clicking it fires hass-toggle-menu out of the shadow root", () => {
-    const el = mount({ narrow: true });
-    let event = null;
-    window.document.addEventListener("hass-toggle-menu", (e) => { event = e; }, { once: true });
-
-    $(el, "app-toolbar").querySelector(".menu-btn").click();
-
-    // bubbles + composed match fireEvent's defaults in the HA frontend, which
-    // is what lets the event escape our shadow root and reach the app shell.
-    assert.ok(event, "event should reach the document");
-    assert.equal(event.bubbles, true);
-    assert.equal(event.composed, true);
-  });
-
-  test("no button when the sidebar is already showing", () => {
-    const el = mount({ narrow: false });
-    assert.equal($(el, "app-toolbar").querySelector(".menu-btn"), null);
-  });
-
-  test("flipping narrow at runtime re-renders the toolbar", () => {
-    const el = mount({ narrow: false });
-
-    el.narrow = true;
-    assert.ok($(el, "app-toolbar").querySelector(".menu-btn"), "rotating to narrow should add the button");
-
-    el.narrow = false;
-    assert.equal($(el, "app-toolbar").querySelector(".menu-btn"), null);
-  });
-
-  test("an unset narrow still gets a way out", () => {
-    // If HA never tells us, fail toward reachable rather than trapping the user.
-    const el = mount();
-    assert.ok($(el, "app-toolbar").querySelector(".menu-btn"));
-  });
-});
-
-describe("toolbar is pinned by layout, not by positioning", () => {
-  // jsdom does no layout, so these pin the structure that produces it. The
-  // toolbar floated mid-screen on a real phone because ha-panel-custom gives us
-  // no height: `height: 100%` collapsed to auto, the document scrolled instead
-  // of us, and `position: sticky` pinned to that scrollport, not the viewport.
-
-  test("toolbar is a sibling above the scrolling pane, not inside it", () => {
-    const el = mount({ narrow: true });
-    const bar = $(el, "app-toolbar");
-    const content = $(el, "panel-content");
-
-    assert.ok(content, "a dedicated scrolling pane should exist");
-    assert.equal(bar.parentElement, content.parentElement, "both should be top-level children");
-    assert.equal(bar.nextElementSibling, content, "toolbar should come immediately before the pane");
-    assert.equal(content.contains(bar), false, "toolbar must not scroll with the content");
+    assert.equal($(el, "app-toolbar"), null);
+    assert.equal(el.shadowRoot.querySelector(".menu-btn"), null);
   });
 
   test("the cards live inside the scrolling pane", () => {
@@ -224,24 +168,55 @@ describe("toolbar is pinned by layout, not by positioning", () => {
     }
   });
 
-  test("host takes a definite height and does not itself scroll", () => {
+  test("host flexes into its container instead of taking the viewport", () => {
     const el = mount({ narrow: true });
     const css = el.shadowRoot.querySelector("style").textContent;
     const host = css.slice(css.indexOf(":host {"), css.indexOf("}", css.indexOf(":host {")));
 
-    assert.match(host, /flex-direction:\s*column/, "host should lay out as a column");
-    assert.match(host, /100dvh/, "host needs a viewport-derived height, not a percentage");
+    assert.match(host, /flex-direction:\s*column/);
+    assert.match(host, /min-height:\s*0/, "must be able to shrink so the pane scrolls");
     assert.match(host, /overflow:\s*hidden/, "host must not be the scroller");
-    assert.doesNotMatch(host, /height:\s*100%/, "percentage height collapses against ha-panel-custom");
+    assert.doesNotMatch(host, /100dvh|100vh/, "the shell owns the viewport height");
+  });
+});
+
+describe("method description", () => {
+  test("is collapsed by default", () => {
+    const el = mount({ narrow: false });
+    const details = $(el, "method-help").querySelector("details");
+    assert.ok(details, "help should be a disclosure");
+    assert.equal(details.open, false);
+    assert.match(details.querySelector("summary").textContent, /MAD/);
   });
 
-  test("toolbar does not rely on sticky positioning", () => {
-    const el = mount({ narrow: true });
-    const css = el.shadowRoot.querySelector("style").textContent;
-    const bar = css.slice(css.indexOf(".app-toolbar {"), css.indexOf("}", css.indexOf(".app-toolbar {")));
+  test("stays open across method switches once opened", () => {
+    const el = mount({ narrow: false });
+    const details = $(el, "method-help").querySelector("details");
+    details.open = true;
+    details.dispatchEvent(new window.Event("toggle"));
 
-    assert.doesNotMatch(bar, /position:\s*sticky/, "sticky pins to the wrong scrollport here");
-    assert.match(bar, /flex:\s*0 0 auto/, "toolbar should be a fixed-size flex row");
+    $(el, "method-seg").querySelector('[data-value="absolute"]').click();
+
+    const next = $(el, "method-help").querySelector("details");
+    assert.match(next.querySelector("summary").textContent, /Absolute/i);
+    assert.equal(next.open, true);
+  });
+});
+
+describe("baseline days", () => {
+  test("MAD scans send baseline_days from the field", async () => {
+    const el = mount({ narrow: false });
+    $(el, "baseline-days").value = "21";
+    const params = await scanParams(el);
+    assert.equal(params.baseline_days, 21);
+  });
+
+  test("the field is only shown for MAD", () => {
+    const el = mount({ narrow: false });
+    const group = $(el, "opt-baseline");
+    assert.equal(group.classList.contains("hidden"), false);
+    $(el, "method-seg").querySelector('[data-value="top_n"]').click();
+    assert.equal(group.classList.contains("hidden"), true);
   });
 });
 
