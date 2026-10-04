@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.2](https://github.com/poolski/homeassistant-outlier-cleaner/compare/v1.0.1...v1.0.2) (2026-10-04)
+
+
+### Bug Fixes
+
+* **recorder_toolkit:** fix short-range MAD scans and mobile header ([#22](https://github.com/poolski/homeassistant-outlier-cleaner/issues/22)) ([8595fd6](https://github.com/poolski/homeassistant-outlier-cleaner/commit/8595fd609cf01e2371544cd3637b8a6402ce2160))
+
 ## [1.0.1](https://github.com/poolski/homeassistant-outlier-cleaner/compare/v1.0.0...v1.0.1) (2026-09-27)
 
 
